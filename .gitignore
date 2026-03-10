@@ -1,0 +1,64 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.env
+.env.*
+venv/
+venv*/
+ENV/
+env/
+.venv/
+.venv*/
+__pypackages__/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# Test & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+
+# Type checkers
+.mypy_cache/
+
+# IDEs / editors
+.vscode/
+.idea/
+*.iml
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+logs/
+*.log
+
+# Data / datasets (usually large, generated, or not tracked)
+data/
+datasets/
+
+# Model weights & checkpoints
+checkpoints/
+pre_trained/
+results/
+
+# Weights & experiment tracking
+wandb/
+
+# Databases
+*.sqlite3
+*.sqlite
+*.db
