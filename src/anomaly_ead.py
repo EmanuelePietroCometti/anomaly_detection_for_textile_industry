@@ -13,8 +13,10 @@ from config import load_config
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from anomalib.models.image.efficient_ad.lightning_model import EfficientAdModelSize
+from torchvision.transforms import Compose, Resize, ToTensor, Normalize
+from anomalib.pre_processing import EfficientAdPreProcessor
 
-def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, model_size="s", learning_rate=1e-4, weight_decay=1e-5):
+def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, model_size="s", learning_rate=1e-4, weight_decay=1e-5, num_workers=4):
     """
     Function to train the EfficientAD model on the textile dataset. It sets up the data, initializes the model, and runs the training and evaluation loop. After testing, it extracts predictions to compute and display a detailed confusion matrix along with accuracy, precision, recall, and F1-score metrics. It also provides warnings about false negatives and false positives.
         Parameters:
@@ -43,6 +45,12 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
     gen_config = config.get("general_configuration", {})
     
     print("Setting up Dataset for EfficientAD...")
+    transform = Compose([
+        Resize((256, 256)),
+        ToTensor(),
+        Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    pre_processor = EfficientAdPreProcessor(transform=transform)
     datamodule = Folder(
         name="textiles_ead",
         root=dataset_cfg.get("root", "./data"),
@@ -51,7 +59,9 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
         normal_test_dir=dataset_cfg.get("test_good_path", "./data/test/good").replace("./data/", ""),
         extensions=tuple(gen_config.get("valid_extensions", [".bmp",".BMP"])),
         train_batch_size=train_batch_size,
-        eval_batch_size=eval_batch_size,     
+        eval_batch_size=eval_batch_size,
+        num_workers=4,
+        pre_process=pre_processor
     )
     datamodule.setup()
     
@@ -100,6 +110,10 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
         max_epochs=num_epochs, 
         logger=logger,
         callbacks=callbacks,
+        accelerator="cuda" if torch.cuda.is_available() else "cpu",
+        devices=1 if torch.cuda.is_available() else None,
+        precision=16 if torch.cuda.is_available() else 32,
+        check_val_every_n_epoch=5,
     )
 
     print("Starting Training... (The loss will decrease as it learns your normality)")
@@ -145,3 +159,6 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
         print(f"WARNING: The model generated {fn} False Negatives (Missed defects shipped to customer!).")
     if fp > 0:
         print(f"NOTE: The model generated {fp} False Positives (Good parts rejected).")
+
+if __name__ == "__main__":
+    train_efficientad()

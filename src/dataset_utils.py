@@ -10,7 +10,9 @@ from config import load_config
 def augmentation_dust_threads(source, destination, num_variants=1):
     """
     Function that applies a series of augmentations to the input images, creating augmented versions of the original images.
-    - num_variants: number of augmented variants to create for each original image. For example
+    - source: the directory containing the original images.
+    - destination: the directory where the augmented images will be saved.
+    - num_variants: number of augmented variants to create for each original image.
     """
     config = load_config()
 
@@ -56,7 +58,8 @@ def augmentation_dust_threads(source, destination, num_variants=1):
 def augmentation_cimossa(source, destination, num_variants=1):
     """
     Function that applies a horizontal flip and a vertical flip to the input images, creating augmented versions of the original images.
-    - destination: boolean flag that indicates whether the augmented images should be saved in the train folder (if True) or in the test folder (if false).
+    - source: the directory containing the original images.
+    - destination: the directory where the augmented images will be saved.
     - num_variants: number of augmented variants to create for each original image. For example, if num_variants is set to 2, the function will create two augmented versions of each original image, 
     in addition to the original image itself.
     """

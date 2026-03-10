@@ -7,8 +7,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
-from sklearn.metrics import make_scorer,f1_score, balanced_accuracy_score
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.metrics import make_scorer,f1_score, balanced_accuracy_score, accuracy_score
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 from sklearn.model_selection import StratifiedKFold, cross_validate
 import seaborn as sns
 from config import load_config
@@ -17,9 +17,19 @@ from sklearn.preprocessing import StandardScaler
 
 
 def extract_features(folder_map, config):
+    """
+    Extracts features from images in the specified folders using a pre-trained ResNet18 model. The function processes each image, applies necessary transformations, and collects the resulting feature vectors along with their corresponding labels and file paths. It handles potential issues such as missing folders or loading errors gracefully, providing informative warnings to the user.
+    Args:
+        folder_map (dict): A dictionary mapping folder paths to their corresponding labels (e.g., {"./data/train": "Train - Good", "./data/test/good": "Test - Good", "./data/test/reject": "Test - Defect"}).
+        config (dict): The configuration dictionary loaded from the YAML file, which may contain parameters for image transformations and valid file extensions.
+    Returns:
+        features (numpy.ndarray): A matrix of extracted features where each row corresponds to an image.
+        labels (numpy.ndarray): The array of labels corresponding to each feature vector.
+        image_paths (numpy.ndarray): The array of file paths corresponding to each feature vector.
+
+    """
     # Initialize ResNet18 (Feature Extractor only)
-    weights = models.ResNet18_Weights.DEFAULT
-    model = models.resnet18(weights=weights)
+    model = models.wide_resnet50_2(weights="DEFAULT")
     model.fc = torch.nn.Identity()
     model.eval()
     
@@ -72,10 +82,19 @@ def extract_features(folder_map, config):
 
     return np.array(features), np.array(labels), np.array(image_paths)
 
-def plot_interactive_tsne(features, labels, image_paths):
+def plot_interactive_tsne(features, labels, image_paths, n_components_pca=50, destination_path="interactive_tsne_plot.png"):
+    """
+    Plots an interactive t-SNE visualization of the feature space. After reducing dimensionality with PCA, it applies t-SNE to project the features into 2D. Each point is colored by its label, and clicking on a point will open the corresponding image for visual inspection.
+    Args:
+    - features (numpy.ndarray): The matrix of extracted features (samples x features).
+    - labels (numpy.ndarray): The array of labels corresponding to each feature vector.
+    - image_paths (numpy.ndarray): The array of file paths corresponding to each feature vector.
+    - n_components_pca (int): The number of PCA components to retain before applying t-SNE (default: 50).
+    - destination_path (str): The path where the interactive plot will be saved (default: "interactive_tsne_plot.png").
+    """
     print("Dimensionality reduction with PCA + t-SNE...")
     
-    pca = PCA(n_components=min(50, len(features)))
+    pca = PCA(n_components=n_components_pca)
     features_pca = pca.fit_transform(features)
     tsne = TSNE(n_components=2, perplexity=30, random_state=42)
     features_2d = tsne.fit_transform(features_pca)
@@ -114,92 +133,73 @@ def plot_interactive_tsne(features, labels, image_paths):
 
     fig.canvas.mpl_connect('pick_event', on_pick)
     print("\nPlot ready! Use the mouse to explore the points.")
+    plt.savefig(destination_path, dpi=300)
+    print(f"Plot saved as '{destination_path}'")
     plt.show()
 
-def test_lda_separability(features, labels):
-    print("\n--- LINEAR SEPARABILITY TEST (LDA) ---")
+def realistic_pca_lda_analysis(features_good, features_defect, n_pca_components, destination_path="pca_lda_analysis.png"):
+    """
+    Executes a dimensionality reduction pipeline (PCA) followed by classification (LDA)
+    to obtain a realistic estimate of defect separability.
     
-    # Filter only "Good" and "Defect" classes for LDA
-    mask_good = (labels == "Train - Good") | (labels == "Test - Good")
-    mask_defects = (labels == "Test - Defect")
+    :param features_good: Numpy array of features extracted from normal (good) images.
+    :param features_defect: Numpy array of features extracted from defective images.
+    :param n_pca_components: The number obtained from the variance plot (e.g., 95% cut-off).
+    :param destination_path: The path where the analysis plot will be saved.
+    """
+    print(f"Input data: {len(features_good)} Good, {len(features_defect)} Defects.")
     
-    if not any(mask_good) or not any(mask_defects):
-        print("Error: Missing classes. Make sure 'Good' and 'Defect' data is loaded.")
-        return 0.0
+    # Labels (0 = Good, 1 = Defect)
+    X = np.vstack((features_good, features_defect))
+    y = np.hstack((np.zeros(len(features_good)), np.ones(len(features_defect))))
+    
+    # Standardization
+    print("Standardizing data...")
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    # Dimensionality Reduction (PCA)
+    print(f"Applying PCA: Compressing from {X.shape[1]} to {n_pca_components} dimensions...")
+    pca = PCA(n_components=n_pca_components)
+    X_pca = pca.fit_transform(X_scaled)
+    
+    # Train LDA on the TRUE signal
+    print("Training LDA on the reduced space...")
+    lda = LDA()
+    X_lda = lda.fit_transform(X_pca, y)
+    
+    y_pred = lda.predict(X_pca)
+    acc = accuracy_score(y, y_pred)
+    print("\n" + "="*50)
+    print(f"REAL LINEAR ACCURACY: {acc*100:.2f}%")
+    print("="*50 + "\n")
+    
+    plt.figure(figsize=(10, 6))
+    
+    lda_good = X_lda[y == 0].flatten()
+    lda_defect = X_lda[y == 1].flatten()
+    
+    # Plot distributions with KDE (Kernel Density Estimate)
+    sns.histplot(lda_good, color="#1f77b4", label="Good (0)", kde=True, stat="density", bins=30, alpha=0.5)
+    sns.histplot(lda_defect, color="#d62728", label="Defect (1)", kde=True, stat="density", bins=30, alpha=0.5)
+    
+    plt.title(f'Realistic LDA Projection (on {n_pca_components} PCA Components)\nAccuracy: {acc*100:.2f}%', fontsize=14, pad=15)
+    plt.xlabel('LDA Discriminant Axis', fontsize=12)
+    plt.ylabel('Density', fontsize=12)
+    plt.legend(loc='upper right')
+    plt.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(destination_path, dpi=300)
+    print(f"Plot saved as '{destination_path}'")
+    plt.show()
 
-    X_binary = np.vstack((features[mask_good], features[mask_defects]))
-    Y_binary = np.concatenate((np.zeros(sum(mask_good)), np.ones(sum(mask_defects))))
-    
-    # Train the LDA (Finds the best separating hyperplane)
-    lda = LinearDiscriminantAnalysis()
-    X_lda = lda.fit_transform(X_binary, Y_binary)
-    
-    # Calculate the theoretical accuracy of this surface
-    score = lda.score(X_binary, Y_binary)
-    print(f"Accuracy of the found linear surface: {score * 100:.2f}%")
-    
-    return score
-
-def lda_cross_validation(features, labels):
-    print("\n--- LINEAR SEPARABILITY TEST (LDA) - TRUTH DETECTOR ---")
-    
-    mask_good = (labels == "Train - Good") | (labels == "Test - Good")
-    mask_defects = (labels == "Test - Defect")
-    
-    if not any(mask_good) or not any(mask_defects):
-        print("Error: Missing classes.")
-        return
-
-    X_binary = np.vstack((features[mask_good], features[mask_defects]))
-    Y_binary = np.concatenate((np.zeros(sum(mask_good)), np.ones(sum(mask_defects))))
-    
-    print(f"Total samples: {len(Y_binary)} (Good: {sum(mask_good)}, Defects: {sum(mask_defects)})")
-    print(f"Number of dimensions (features): {X_binary.shape[1]}")
-    
-    # Retrieve the "fake" accuracy of the linear surface on the same data (overfitting check)
-    score_overfit = test_lda_separability(features, labels)
-    print(f"\n[WARNING] 'Fake' Accuracy (Train and Test on same data): {score_overfit * 100:.2f}%")
-    
-    # PCA: Reduce to 20 dimensions to prevent overfitting and make the problem more realistic for cross-validation
-    n_components = 240
-    print(f"\nApplying PCA: Reducing dimensions from {X_binary.shape[1]} to {n_components} for Cross-Validation...")
-    pca = PCA(n_components=n_components)
-    X_pca = pca.fit_transform(X_binary)
-    
-    # Cross-validation with LDA as the classifier
-    lda = LinearDiscriminantAnalysis()
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    
-    scoring = {
-        'balanced_acc': make_scorer(balanced_accuracy_score),
-        'f1': make_scorer(f1_score)
-    }
-    
-    # Perform cross-validation and compute metrics
-    scores = cross_validate(lda, X_pca, Y_binary, cv=skf, scoring=scoring)
-    
-    bal_acc_mean = scores['test_balanced_acc'].mean()
-    f1_mean = scores['test_f1'].mean()
-    
-    print(f"[REAL] Cross-Validation Balanced Accuracy: {bal_acc_mean * 100:.2f}% (Baseline: 50%)")
-    print(f"[REAL] Cross-Validation F1-Score: {f1_mean:.4f} (Perfect: 1.0000)")
-    
-    # Analyze results and provide diagnosis
-    if f1_mean < 0.5 and score_overfit > 0.95:
-        print("\n❌ DIAGNOSIS: SEVERE OVERFITTING. The 100% was an illusion caused by too many dimensions.")
-        print("-> Conclusion: The defects are NOT linearly separable on unseen data. You MUST use Anomaly Detection (EfficientAD).")
-    elif f1_mean >= 0.85:
-        print("\n✅ DIAGNOSIS: REAL SEPARATION. The defects are genuinely linearly separable even with strict metrics.")
-        print("-> Conclusion: Check for trivial artifacts (lighting/cropping). If none exist, your problem is extremely easy.")
-    else:
-        print("\n⚠️ DIAGNOSIS: MODERATE SEPARATION. The linear model struggles on unseen data.")
-        print("-> Conclusion: EfficientAD remains the most robust choice to handle your variations.")
-
-def analyze_pca_variance(features_matrix):
+def analyze_pca_variance(features_matrix, destination_path="pca_cumulative_variance_report.png"):
     """
     Analyze the explained variance of PCA components to determine how many dimensions are needed to capture most of the variance.
     Args:
         features_matrix (numpy.ndarray): The matrix of extracted features (samples x features).
+        destination_path (str): The path where the diagnostic plot will be saved.
     """
     print("\n --- PCA VARIANCE ANALYSIS ---")
     print("Standardizing features...")
@@ -216,7 +216,39 @@ def analyze_pca_variance(features_matrix):
     n_95 = np.argmax(cumulative_variance >= 0.95) + 1
     n_99 = np.argmax(cumulative_variance >= 0.99) + 1
 
+    print("\n" + "="*50)
+    print("DIMENSIONALITY ANALYSIS RESULTS (PCA)")
+    print("="*50)
+    print(f"To retain 90% of the information, you only need: {n_90} components")
+    print(f"To retain 95% of the information, you only need: {n_95} components")
+    print(f"To retain 99% of the information, you only need: {n_99} components")
+    print(f"The remaining {features_matrix.shape[1] - n_99} components are ALMOST CERTAINLY NOISE.")
+    print("="*50 + "\n")
+
+    # Generate Diagnostic Plot
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(1, len(cumulative_variance) + 1), cumulative_variance, linewidth=2, color='#1f77b4')
     
+    # Horizontal and vertical threshold lines
+    plt.axhline(y=0.95, color='red', linestyle='--', alpha=0.7, label=f'95% Variance ({n_95} comp.)')
+    plt.axvline(x=n_95, color='red', linestyle=':', alpha=0.7)
+    
+    plt.axhline(y=0.99, color='green', linestyle='--', alpha=0.7, label=f'99% Variance ({n_99} comp.)')
+    plt.axvline(x=n_99, color='green', linestyle=':', alpha=0.7)
+
+    plt.title('Cumulative Explained Variance (Cumulative Scree Plot)', fontsize=14, pad=15)
+    plt.xlabel('Number of Principal Components (PCA)', fontsize=12)
+    plt.ylabel('Cumulative Explained Variance Ratio (0.0 - 1.0)', fontsize=12)
+    plt.legend(loc='lower right')
+    plt.grid(True, alpha=0.3)
+    
+    # Save and display the plot
+    plt.tight_layout()
+    plt.savefig(destination_path, dpi=300)
+    print(f"Plot saved as '{destination_path}'")
+    plt.show()
+    
+    return n_95
 
 
 if __name__ == "__main__":
@@ -239,7 +271,8 @@ if __name__ == "__main__":
     X, Y, paths = extract_features(folder_map, config) 
     
     if len(X) > 0:
-        plot_interactive_tsne(X, Y, paths)
-        lda_cross_validation(X, Y)
+        n_95=analyze_pca_variance(X, destination_path=config.get("paths", {}).get("pca_cumulative_variance_plot_path", "pca_cumulative_variance_report.png"))
+        plot_interactive_tsne(X, Y, paths, n_components_pca=n_95, destination_path=config.get("paths", {}).get("interactive_tsne_plot_path", "interactive_tsne_plot.png"))
+        realistic_pca_lda_analysis(X[Y == "Train - Good"], X[Y == "Test - Defect"], n_pca_components=n_95, destination_path=config.get("paths", {}).get("pca_lda_analysis_plot_path", "pca_lda_analysis.png"))
     else:
         print("No images found! Check the paths entered in your yaml or script.")

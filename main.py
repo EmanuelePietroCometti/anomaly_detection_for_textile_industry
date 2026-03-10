@@ -73,6 +73,12 @@ def main():
         default=1e-5,
         help="Weight decay for EfficientAD training. Ignored if baseline is Patchcore."
     )
+    argparser.add_argument(
+        "--num-workers",
+        type=int,
+        default=4,
+        help="Number of workers for data loading. Ignored if baseline is Patchcore."
+    )
     args = argparser.parse_args()
 
     if args.create_dataset:
@@ -81,7 +87,7 @@ def main():
     if args.baseline == "patchcore":
         apply_patchcore_model(args.num_epochs, args.train_batch_size, args.eval_batch_size, args.coreset_sampling_ratio, backbone=args.backbone, layers=args.layers.split(","))
     elif args.baseline == "efficientad":
-        train_efficientad(args.num_epochs, args.train_batch_size, args.eval_batch_size, args.model_size, args.learning_rate, args.weight_decay)
+        train_efficientad(args.num_epochs, args.train_batch_size, args.eval_batch_size, args.model_size, args.learning_rate, args.weight_decay, args.num_workers)
 
 if __name__ == "__main__":
     main()

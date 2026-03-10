@@ -126,6 +126,6 @@ def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, c
     print("="*65 + "\n")
 
     if fn > 0:
-        print(f"⚠️ WARNING: The model generated {fn} False Negatives (Missed defects shipped to customer!).")
+        print(f"WARNING: The model generated {fn} False Negatives (Missed defects shipped to customer!).")
     if fp > 0:
-        print(f"ℹ️ NOTE: The model generated {fp} False Positives (Good parts rejected/scrapped).")
+        print(f"NOTE: The model generated {fp} False Positives (Good parts rejected/scrapped).")

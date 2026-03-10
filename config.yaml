@@ -1,0 +1,61 @@
+general_configuration:
+  image_size: [512, 512]
+  valid_extensions: [".bmp", ".BMP"]
+paths:
+  source_good_images: "d:/emanuele/Code/dataset/Training"
+  destination_good_images: 'data'
+  destination_reject_images: 'data/test/reject'
+  source_cimossa: "e:/REDA/319676_1 ART. 75005 (greggio)/Da verificare/cimossa"
+  destination_training_cimossa: "data/augmentation/cimossa_original/train"
+  destination_test_cimossa: "data/augmentation/cimossa_original/test"
+  destination_cimossa_augmentation_train: "data/augmentation/cimossa/train"
+  destination_cimossa_augmentation_test: "data/augmentation/cimossa/test"
+  source_folder_textile: "e:/REDA/319676_1 ART. 75005 (greggio)/Training/SYS1/OK"
+  destination_folder_textile_original_train: "data/augmentation/textile_original/train"
+  destination_folder_textile_original_test: "data/augmentation/textile_original/test"
+  destination_folder_textile_augmented_train: "data/augmentation/textile/train"
+  destination_folder_textile_augmented_test: "data/augmentation/textile/test"
+  folder_train: "train"
+  folder_test: "test"
+  train_path: "./data/train"
+  test_good_path: "./data/test/good"
+  test_reject_path: "./data/test/reject"
+  root: "./data"
+  source_dust_images: "e:/REDA/319676_1 ART. 75005 (greggio)/Da verificare/original_dust"
+  destination_dust_images_train: "data/augmentation/dust/train"
+  destination_dust_images_test: "data/augmentation/dust_original/test"
+  destination_dust_images_augmentation_train: "data/augmentation/dust/train"
+  destination_dust_images_augmentation_test: "data/augmentation/dust/test"
+  random_images_for_augmentation_textile: "e:/REDA/319676_1 ART. 75005 (greggio)/Training/SYS1/OK"
+  paths_dataset: ["data/augmentation/dust", "data/augmentation/cimossa", "data/augmentation/textile"]
+  pca_cumulative_variance_plot_path: "results/EDA/pca_cumulative_variance.png"
+  pca_lda_analysis_plot_path: "results/EDA/pca_lda_analysis.png"
+  interactive_tsne_plot_path: "results/EDA/interactive_tsne_plot.png"
+  source_folder_nok: ["e:/REDA/319676_1 ART. 75005 (greggio)/Da verificare/reject"]
+  benchmark_pareto_front: "results/benchmark_pareto_front.csv"
+split_ratios:
+  train_ratio: 0.35
+  test_ratio_good: 0.06
+  split_ratio_cimossa_train: 0.05
+  split_ratio_cimossa_test: 0.01
+  split_ratio_textile_train: 0.07
+  split_ratio_textile_test: 0.015
+  split_ratio_dust_train: 0.75
+  split_ratio_dust_test: 0.2
+  num_variants_augmentation_cimossa_train: 1
+  num_variants_augmentation_cimossa_test: 1
+  num_variants_textile_augmentation: 6
+  num_variants_augmentation_dust_threads_train: 2
+  num_variants_augmentation_dust_threads_test: 2
+augmentation_params:
+  prob_h_flip_augmentation_dust: 0.5
+  prob_v_flip_augmentation_dust: 0.5
+  prob_h_flip_augmentation_cimossa: 0.5
+  prob_v_flip_augmentation_cimossa: 0.5
+  intensity_min_range_augmentation_textile: 0.2
+  intensity_max_range_augmentation_textile: 0.6
+  min_num_waves_augmentation_textile: 0.5
+  max_num_waves_augmentation_textile: 1.0
+  min_force_augmentation_textile: 0.0
+  max_force_augmentation_textile: 60.0
+  
