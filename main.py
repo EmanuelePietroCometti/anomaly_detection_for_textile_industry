@@ -1,9 +1,12 @@
 from src.dataset_utils import create_dataset
-from anomaly_patchcore import apply_patchcore_model
+from anomaly_patchcore import apply_patchcore_model, export_checkpoint_to_onnx
 from anomaly_ead import train_efficientad
 import argparse
+from config import load_config
+from pathlib import Path
 
 def main():
+    config = load_config()
     argparser = argparse.ArgumentParser(description="Run the Anomaly Detection Pipeline")
     argparser.add_argument(
         "--create-dataset", 
@@ -79,13 +82,20 @@ def main():
         default=4,
         help="Number of workers for data loading. Ignored if baseline is Patchcore."
     )
+    argparser.add_argument(
+        "--num-nearest-neighbors",
+        type=int,
+        default=5,
+        help="Number of workers for data loading. Ignored if baseline is Patchcore."
+    )
     args = argparser.parse_args()
 
     if args.create_dataset:
         create_dataset()
     
     if args.baseline == "patchcore":
-        apply_patchcore_model(args.num_epochs, args.train_batch_size, args.eval_batch_size, args.coreset_sampling_ratio, backbone=args.backbone, layers=args.layers.split(","))
+        apply_patchcore_model(args.num_epochs, args.train_batch_size, args.eval_batch_size, args.coreset_sampling_ratio, backbone=args.backbone, layers=args.layers.split(","), num_nearest_neighbors=args.num_nearest_neighbors)
+        export_checkpoint_to_onnx(ckpt_path=config["paths"]["checkpoint_destination"], export_dir=config["paths"]["exports_onnx_path"], backbone=args.backbone, layers=args.layers.split(","))
     elif args.baseline == "efficientad":
         train_efficientad(args.num_epochs, args.train_batch_size, args.eval_batch_size, args.model_size, args.learning_rate, args.weight_decay, args.num_workers)
 

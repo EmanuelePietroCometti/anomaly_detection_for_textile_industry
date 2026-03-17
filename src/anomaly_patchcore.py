@@ -11,9 +11,10 @@ import torch
 import warnings
 from config import load_config
 from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, recall_score, f1_score
-import numpy as np
+from anomalib.deploy import ExportType
+from anomalib.data.utils import ValSplitMode
 
-def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, coreset_sampling_ratio=0.1, backbone="efficientnet_b5", layers=["blocks.4", "blocks.6"]):
+def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, coreset_sampling_ratio=0.1, backbone="efficientnet_b5", layers=["blocks.4", "blocks.6"], num_nearest_neighbors=5):
     """
     Function to apply the Patchcore model on the textile dataset. It sets up the data, initializes the model, and runs the training and evaluation loop. After testing, it extracts predictions to compute and display a detailed confusion matrix along with accuracy, precision, recall, and F1-score metrics. It also provides warnings about false negatives and false positives.
         Parameters:
@@ -45,7 +46,7 @@ def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, c
         normal_test_dir=dataset_cfg.get("test_good_path", "./data/test/good").replace("./data/", ""),
         extensions=tuple(gen_config.get("valid_extensions", [".bmp",".BMP"])),
         train_batch_size=train_batch_size,
-        eval_batch_size=eval_batch_size,
+        eval_batch_size=eval_batch_size
     )
 
     datamodule.setup()
@@ -63,14 +64,15 @@ def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, c
     model = Patchcore(
         backbone= backbone,
         layers=layers,
-        coreset_sampling_ratio=coreset_sampling_ratio
+        coreset_sampling_ratio=coreset_sampling_ratio,
+        num_neighbors=num_nearest_neighbors,
     )
 
     engine = Engine(
         max_epochs=num_epochs,          
         logger=logger,
         callbacks=callbacks,
-        accelerator="auto",          
+        accelerator="gpu",          
     )
 
     print("Starting training with Patchcore model...")
@@ -78,54 +80,84 @@ def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, c
     print("Training completed.")
 
     print("Evaluating Patchcore model...")
-    test_results = engine.test(model=model, datamodule=datamodule)
+    engine.test(model=model, datamodule=datamodule)
     print("Evaluation completed.")
-
-    #print("Test results:\n", test_results)
+    engine.trainer.save_checkpoint("checkpoints/patchcore-tested.ckpt")
     print("\nExtracting predictions for the Confusion Matrix...")
     predictions = engine.predict(model=model, dataloaders=datamodule.test_dataloader())
 
     y_true = []
     y_pred = []
 
-    # Extract the real labels and the ones predicted by the model
     for batch in predictions:
         y_true.extend(batch.gt_label.cpu().numpy())
         y_pred.extend(batch.pred_label.cpu().numpy())
 
-    # 1. Usiamo lo standard: 0=Sano (Negativo), 1=Difetto (Positivo)
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
 
-    # 2. Le metriche ora calcolano correttamente sui Difetti (1) di default
     acc = accuracy_score(y_true, y_pred)
     prec = precision_score(y_true, y_pred, zero_division=0)
     rec = recall_score(y_true, y_pred, zero_division=0)
     f1 = f1_score(y_true, y_pred, zero_division=0)
     
-    # Estrazione sicura dell'AUROC
-    auroc = 0.0
-    if isinstance(test_results, list) and len(test_results) > 0:
-        auroc = test_results[0].get("auroc", 0.0)
-    elif isinstance(test_results, dict):
-        auroc = test_results.get("auroc", 0.0)
-
-    # 3. Formatted Print (Dashboard Style) - Logica di Fabbrica Corretta
     print("\n" + "="*65)
     print(" DETAILED REPORT: CONFUSION MATRIX")
     print("="*65)
-    print(f"                       | Predicted: GOOD (0) | Predicted: DEFECT (1)")
+    print(f"                            | True: GOOD (0)     | True: DEFECT (1)")
     print("-" * 65)
-    print(f" Actual: GOOD (0)      | [ TN: {tn:<4} ] (Accepted)     | [ FP: {fp:<4} ] (False Alarms)")
-    print(f" Actual: DEFECT (1)    | [ FN: {fn:<4} ] (Miss/Escape)  | [ TP: {tp:<4} ] (Found) ")
+    print(f" Predicted: GOOD (0)        | [ TP: {tp:<4} ]    | [ FP: {fp:<4} ] ")
+    print(f" Predicted: DEFECT (1)      | [ FN: {fn:<4} ]    | [ TN: {tn:<4} ] ")
     print("="*65)
     print(f"    Accuracy    : {acc*100:>6.2f}%")
     print(f"    Precision   : {prec*100:>6.2f}% (When it rejects, it is an actual defect {prec*100:.0f}% of the time)")
     print(f"    Recall      : {rec*100:>6.2f}% (Finds {rec*100:.0f}% of all real defects)")
     print(f"    F1-Score    : {f1:>6.4f}")
-    print(f"    AUROC       : {auroc*100:>6.2f}%")
     print("="*65 + "\n")
 
     if fn > 0:
         print(f"WARNING: The model generated {fn} False Negatives (Missed defects shipped to customer!).")
     if fp > 0:
         print(f"NOTE: The model generated {fp} False Positives (Good parts rejected/scrapped).")
+
+def export_checkpoint_to_onnx(ckpt_path, export_dir, backbone, layers):
+    """
+    Function that export the model in ONNX format
+
+    Args:
+    - ckpt_path: path of the checkpoint directory
+    - export_dir: directory where the onnx file will be saved
+    - backbone: backbone used in training 
+    - layers: layers used for the model
+    """
+    print(f"Initializing checkpoint load from: {ckpt_path}")
+        
+    model = Patchcore(backbone=backbone, layers=layers)
+    engine = Engine()
+
+    original_onnx_export = torch.onnx.export
+
+    def patched_onnx_export(*args, **kwargs):
+        if "dynamic_axes" in kwargs:
+            del kwargs["dynamic_axes"]
+        
+        kwargs["dynamo"] = False 
+        
+        return original_onnx_export(*args, **kwargs)
+
+    torch.onnx.export = patched_onnx_export
+
+    print("Starting ONNX conversion...")
+    try:
+        export_path = engine.export(
+            model=model,
+            export_type=ExportType.ONNX,
+            export_root=export_dir,
+            ckpt_path=ckpt_path
+        )
+        print(f"\n[SUCCESS] Model successfully exported to: {export_path}")
+        
+    except Exception as e:
+        print(f"\n[ERROR] Export failed: {e}")
+        
+    finally:
+        torch.onnx.export = original_onnx_export

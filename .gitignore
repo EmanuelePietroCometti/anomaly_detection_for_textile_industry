@@ -20,6 +20,7 @@ dist/
 *.egg-info/
 .eggs/
 *.egg
+exports/
 
 # Test & coverage
 .pytest_cache/

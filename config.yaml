@@ -32,7 +32,10 @@ paths:
   pca_lda_analysis_plot_path: "results/EDA/pca_lda_analysis.png"
   interactive_tsne_plot_path: "results/EDA/interactive_tsne_plot.png"
   source_folder_nok: ["e:/REDA/319676_1 ART. 75005 (greggio)/Da verificare/reject"]
-  benchmark_pareto_front: "results/benchmark_pareto_front.csv"
+  benchmark_pareto_front_patchcore: "results/benchmark/benchmark_pareto_front_patchcore.csv"
+  benchmark_pareto_front_efficientad: "results/benchmark/benchmark_pareto_front_efficientad.csv"
+  checkpoint_destination: "checkpoints/patchcore-tested.ckpt"
+  exports_onnx_path: "exports/patchcore_onnx"
 split_ratios:
   train_ratio: 0.35
   test_ratio_good: 0.06

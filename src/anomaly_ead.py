@@ -14,7 +14,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from anomalib.models.image.efficient_ad.lightning_model import EfficientAdModelSize
 from torchvision.transforms import Compose, Resize, ToTensor, Normalize
-from anomalib.pre_processing import EfficientAdPreProcessor
+from anomalib.pre_processing import PreProcessor
 
 def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, model_size="s", learning_rate=1e-4, weight_decay=1e-5, num_workers=4):
     """
@@ -50,7 +50,7 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
         ToTensor(),
         Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-    pre_processor = EfficientAdPreProcessor(transform=transform)
+    pre_processor = PreProcessor(transform=transform)
     datamodule = Folder(
         name="textiles_ead",
         root=dataset_cfg.get("root", "./data"),
@@ -120,8 +120,8 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
     engine.fit(model=model, datamodule=datamodule)
 
     print("Evaluating the model...")
-    test_results = engine.test(model=model, datamodule=datamodule)
-    print("Test Results:\n", test_results)
+    engine.test(model=model, datamodule=datamodule)
+    print("Evaluation completed.")
     print("\nExtracting predictions for the Confusion Matrix...")
     predictions = engine.predict(model=model, dataloaders=datamodule.test_dataloader())
 
@@ -144,13 +144,13 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
     print("\n" + "="*65)
     print(" DETAILED REPORT: CONFUSION MATRIX")
     print("="*65)
-    print(f"                       | Predicted: GOOD (0) | Predicted: DEFECT (1)")
+    print(f"                            | True: GOOD (0)               | True: DEFECT (1)")
     print("-" * 65)
-    print(f" Actual: GOOD (0)      | [ TN: {tn:<4} ] (Accepted)     | [ FP: {fp:<4} ] (False Alarms)")
-    print(f" Actual: DEFECT (1)    | [ FN: {fn:<4} ] (Miss/Escape)  | [ TP: {tp:<4} ] (Found) ")
+    print(f" Predicted: GOOD (0)        | [ TN: {tp:<4} ] (Accepted)     | [ FP: {fp:<4} ] (False Alarms)")
+    print(f" Predicted: DEFECT (1)      | [ FN: {fn:<4} ] (Miss/Escape)  | [ TP: {tn:<4} ] (Found) ")
     print("="*65)
     print(f"    Accuracy    : {acc*100:>6.2f}%")
-    print(f"    Precision   : {prec*100:>6.2f}% (When it rejects, it is actually a defect {prec*100:.0f}% of the time)")
+    print(f"    Precision   : {prec*100:>6.2f}% (When it rejects, it is an actual defect {prec*100:.0f}% of the time)")
     print(f"    Recall      : {rec*100:>6.2f}% (Finds {rec*100:.0f}% of all real defects)")
     print(f"    F1-Score    : {f1:>6.4f}")
     print("="*65 + "\n")
