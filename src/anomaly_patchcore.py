@@ -12,7 +12,8 @@ import warnings
 from config import load_config
 from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, recall_score, f1_score
 from anomalib.deploy import ExportType
-from anomalib.data.utils import ValSplitMode
+import argparse
+import logging
 
 def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, coreset_sampling_ratio=0.1, backbone="efficientnet_b5", layers=["blocks.4", "blocks.6"], num_nearest_neighbors=5):
     """
@@ -27,6 +28,8 @@ def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, c
     """
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="lightning.*")
     warnings.filterwarnings("ignore", message=".*persistent_workers=True.*")
+    logging.getLogger("lightning.pytorch").setLevel(logging.ERROR)
+    logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
     torch.set_float32_matmul_precision('medium')
     load_dotenv()
     hf_token = os.getenv("HUGGING_FACE_HUB_TOKEN")
@@ -52,13 +55,19 @@ def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, c
     datamodule.setup()
 
     logger = AnomalibWandbLogger(project="anomaly-REDA", name="patchcore-run")
-    callbacks = [
+    """ callbacks = [
         ModelCheckpoint(
             dirpath="checkpoints", 
             filename="patchcore-latest"
         ),
         TimerCallback()
-    ]
+    ] """
+    checkpoint_callback = ModelCheckpoint(
+        dirpath="checkpoints",
+        filename="patchcore-latest",
+        monitor="val_loss"
+    )
+    timer_callback = TimerCallback()
     print("Initializing Patchcore model...")
 
     model = Patchcore(
@@ -71,8 +80,8 @@ def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, c
     engine = Engine(
         max_epochs=num_epochs,          
         logger=logger,
-        callbacks=callbacks,
-        accelerator="gpu",          
+        accelerator="gpu",
+        callbacks=[checkpoint_callback, timer_callback]        
     )
 
     print("Starting training with Patchcore model...")
@@ -137,10 +146,16 @@ def export_checkpoint_to_onnx(ckpt_path, export_dir, backbone, layers):
     original_onnx_export = torch.onnx.export
 
     def patched_onnx_export(*args, **kwargs):
-        if "dynamic_axes" in kwargs:
-            del kwargs["dynamic_axes"]
+        kwargs["dynamic_axes"] = {
+            "input": {0: "batch_size"},
+            "output": {0: "batch_size"}
+        }
+
+        kwargs["input_names"] = ["input"]
+        kwargs["output_names"] = ["output"]
         
         kwargs["dynamo"] = False 
+        kwargs["opset_version"] = 14
         
         return original_onnx_export(*args, **kwargs)
 
@@ -152,7 +167,8 @@ def export_checkpoint_to_onnx(ckpt_path, export_dir, backbone, layers):
             model=model,
             export_type=ExportType.ONNX,
             export_root=export_dir,
-            ckpt_path=ckpt_path
+            ckpt_path=ckpt_path,
+            input_size=(224,224)
         )
         print(f"\n[SUCCESS] Model successfully exported to: {export_path}")
         
@@ -161,3 +177,22 @@ def export_checkpoint_to_onnx(ckpt_path, export_dir, backbone, layers):
         
     finally:
         torch.onnx.export = original_onnx_export
+
+
+if __name__ == "__main__":
+    config = load_config()
+    argparser = argparse.ArgumentParser(description="Run the export onnx pipeline")
+    argparser.add_argument(
+        "--backbone", 
+        type=str.lower, 
+        default="efficientnet_b5", 
+        help="Backbone for Patchcore (ex. 'efficientnet_b5'). Ignored if baseline is EfficientAD."
+    )
+    argparser.add_argument(
+        "--layers", 
+        type=str, 
+        default="blocks.4,blocks.6", 
+        help="Comma-separated layers for Patchcore (ex. 'blocks.4,blocks.6'). Ignored if baseline is EfficientAD."
+    )
+    args = argparser.parse_args()
+    export_checkpoint_to_onnx(ckpt_path=config["paths"]["checkpoint_destination"], export_dir=config["paths"]["exports_onnx_path"], backbone=args.backbone, layers=args.layers.split(","))

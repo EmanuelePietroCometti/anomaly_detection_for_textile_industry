@@ -67,10 +67,12 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
     
     logger = AnomalibWandbLogger(project="anomaly-REDA", name="efficientad-run")
     
-    callbacks = [
-        ModelCheckpoint(dirpath="checkpoints", filename="efficientad-latest"),
-        TimerCallback()
-    ]
+    checkpoint_callback = ModelCheckpoint(
+        dirpath="checkpoints",
+        filename="patchcore-latest",
+        monitor="val_loss"
+    )
+    timer_callback = TimerCallback()
 
     
     print(f"Initializing EfficientAD model ({model_size} size)...")
@@ -109,7 +111,7 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
     engine = Engine(
         max_epochs=num_epochs, 
         logger=logger,
-        callbacks=callbacks,
+        callbacks=[checkpoint_callback, timer_callback] ,
         accelerator="cuda" if torch.cuda.is_available() else "cpu",
         devices=1 if torch.cuda.is_available() else None,
         precision=16 if torch.cuda.is_available() else 32,
