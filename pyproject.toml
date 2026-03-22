@@ -1,0 +1,26 @@
+[project]
+name = "anomaly-detection-for-textile-industry"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Emanuele Pietro Cometti",email = "emanuelecometti@hotmail.it"}
+]
+requires-python = ">=3.11, <3.15"
+dependencies = [
+    "requests (>=2.32.5,<3.0.0)",
+    "numpy (>=2.4.3,<3.0.0)",
+    "albumentations (>=2.0.8,<3.0.0)",
+    "opencv-python (>=4.13.0.92,<5.0.0.0)",
+    "torch (>=2.10.0,<3.0.0)",
+    "wandb (>=0.25.1,<0.26.0)",
+    "dotenv (>=0.9.9,<0.10.0)",
+    "anomalib (>=2.2.0,<3.0.0)",
+    "huggingface (>=0.0.1,<0.0.2)",
+    "optuna (>=4.8.0,<5.0.0)",
+    "seaborn (>=0.13.2,<0.14.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

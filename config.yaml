@@ -1,11 +1,11 @@
 general_configuration:
   image_size: [512, 512]
-  valid_extensions: [".bmp", ".BMP", ".png", ".jpg"]
+  valid_extensions: [".bmp", ".BMP"]
 
 dataset_pipeline:
   paths:
-    source_training: "d:/emanuele/Code/new_source_dataset/Training"
-    source_validation: "d:/emanuele/Code/new_source_dataset/Validation"
+    source_training: "C:/Users/emanu/Desktop/tesi/dataset/Training"
+    source_validation: "C:/Users/emanu/Desktop/tesi/dataset/Validation"
     dest_transfer_learning: "./data/dataset_supcon"
     dest_patchcore: "./data/dataset_patchcore"
 
@@ -14,8 +14,9 @@ dataset_pipeline:
     defect_categories: ["nodi", "paglie"]
 
   ratios:
-    tl_allocation_ratio: 0.30 
-    good_stress_multiplier: 1 
+    tl_allocation_ratio: 0.30
+    good_stress_multiplier: 3
+    cimossa_undersampling_ratio: 0.40
 
   augmentation_params:
     prob_h_flip: 0.5
@@ -23,8 +24,28 @@ dataset_pipeline:
     prob_rot_180: 0.5
     prob_stress: 0.5
     textile_intensity_range: [0.2, 0.6]
-    textile_waves_range: [0.5, 1.0]
+    textile_waves_range: [0.5, 0.8]
     textile_force_range: [0.0, 60.0]
+
+  defect_extractor:
+    extract: false
+    max_defects: 30
+
+    source_train: "../dataset/Training"
+    destination_train: "../dataset/Training"
+
+    source_val: "../dataset/Validation"
+    destination_val: "../dataset/Validation"
+
+  synthetic_generator:
+    num_nodi_to_generate: 150
+    num_paglie_to_generate: 150
+
+    src_good_train: "../dataset/source_synth"
+    dest_synth_train: "../dataset_synthetic/Training"
+
+    src_good_val: "../dataset/source_synth"
+    dest_synth_val: "../dataset_synthetic/Validation"
 
 paths:
   pca_cumulative_variance_plot_path: "results/EDA/pca_cumulative_variance.png"

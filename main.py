@@ -1,71 +1,71 @@
-from src.dataset_utils import create_dataset
-from anomaly_patchcore import apply_patchcore_model, export_checkpoint_to_onnx
-from anomaly_ead import train_efficientad
+from src.dataset_utils import build_mutually_exclusive_datasets
+from src.anomaly_patchcore import apply_patchcore_model, export_checkpoint_to_onnx
+from src.anomaly_ead import train_efficientad
 import argparse
-from config import load_config
+from src.config import load_config
 from pathlib import Path
 
 def main():
     config = load_config()
     argparser = argparse.ArgumentParser(description="Run the Anomaly Detection Pipeline")
     argparser.add_argument(
-        "--create-dataset", 
+        "--create-dataset",
         default=False ,
-        action="store_true", 
+        action="store_true",
         help="Whether to create the dataset before training"
         )
     argparser.add_argument(
-        "--baseline", 
+        "--baseline",
         type=str.lower,
-        choices=["efficientad", "patchcore"], 
+        choices=["efficientad", "patchcore"],
         default="efficientad",
         help="Select the modol to execute: 'efficientad' or 'patchcore'"
     )
     argparser.add_argument(
-        "--num-epochs", 
-        type=int, 
-        default=100, 
+        "--num-epochs",
+        type=int,
+        default=100,
         help="Numbers of epochs (ex. 100 for EAD, 1 for Patchcore)"
     )
     argparser.add_argument(
-        "--train-batch-size", 
-        type=int, 
-        default=8, 
+        "--train-batch-size",
+        type=int,
+        default=8,
         help="Training batch size"
     )
     argparser.add_argument(
         "--eval-batch-size",
         type=int,
-        default=8, 
+        default=8,
         help="Test batch size"
     )
     argparser.add_argument(
-        "--model-size", 
+        "--model-size",
         type=str.lower,
         choices=["s", "m"],
-        default="s", 
+        default="s",
         help="Student-teacher model size for EfficientAD (S or M). Ignored if baseline is Patchcore."
     )
     argparser.add_argument(
-        "--coreset-sampling-ratio", 
-        type=float, 
-        default=0.1, 
+        "--coreset-sampling-ratio",
+        type=float,
+        default=0.1,
         help="Coreset sampling ratio for Patchcore (ex. 0.1 means 10% of patches). Ignored if baseline is EfficientAD."
     )
     argparser.add_argument(
-        "--backbone", 
-        type=str.lower, 
-        default="efficientnet_b5", 
+        "--backbone",
+        type=str.lower,
+        default="efficientnet_b5",
         help="Backbone for Patchcore (ex. 'efficientnet_b5'). Ignored if baseline is EfficientAD."
     )
     argparser.add_argument(
-        "--layers", 
-        type=str, 
-        default="blocks.4,blocks.6", 
+        "--layers",
+        type=str,
+        default="blocks.4,blocks.6",
         help="Comma-separated layers for Patchcore (ex. 'blocks.4,blocks.6'). Ignored if baseline is EfficientAD."
     )
     argparser.add_argument(
-        "--learning-rate", 
+        "--learning-rate",
         type=float,
         default=1e-4,
         help="Learning rate for EfficientAD training. Ignored if baseline is Patchcore."
@@ -91,8 +91,8 @@ def main():
     args = argparser.parse_args()
 
     if args.create_dataset:
-        create_dataset()
-    
+        build_mutually_exclusive_datasets()
+
     if args.baseline == "patchcore":
         apply_patchcore_model(args.num_epochs, args.train_batch_size, args.eval_batch_size, args.coreset_sampling_ratio, backbone=args.backbone, layers=args.layers.split(","), num_nearest_neighbors=args.num_nearest_neighbors)
         export_checkpoint_to_onnx(ckpt_path=config["paths"]["checkpoint_destination"], export_dir=config["paths"]["exports_onnx_path"], backbone=args.backbone, layers=args.layers.split(","))

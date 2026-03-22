@@ -1,4 +1,4 @@
-from dataset_utils import create_dataset
+from dataset_utils import build_mutually_exclusive_datasets
 from anomaly_patchcore import apply_patchcore_model, export_checkpoint_to_onnx
 from anomaly_ead import train_efficientad
 from config import load_config
