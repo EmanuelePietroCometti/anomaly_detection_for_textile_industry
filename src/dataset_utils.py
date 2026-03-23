@@ -1,4 +1,3 @@
-import os
 import cv2
 import random
 import shutil
@@ -101,9 +100,6 @@ def apply_dynamic_augmentation(image_path, config):
             return image_distorted
 
     return image_aug
-
-import random
-from pathlib import Path
 
 def extract_images_by_category(source_dir, category_list, valid_extensions):
     """
