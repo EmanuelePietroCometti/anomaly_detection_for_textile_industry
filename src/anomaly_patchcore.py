@@ -12,73 +12,86 @@ import warnings
 from config import load_config
 from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, recall_score, f1_score
 from anomalib.deploy import ExportType
-import argparse
 import logging
 
-def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, coreset_sampling_ratio=0.1, backbone="efficientnet_b5", layers=["blocks.4", "blocks.6"], num_nearest_neighbors=5):
+def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "blocks.6"], custom_weights_path=None):
     """
-    Function to apply the Patchcore model on the textile dataset. It sets up the data, initializes the model, and runs the training and evaluation loop. After testing, it extracts predictions to compute and display a detailed confusion matrix along with accuracy, precision, recall, and F1-score metrics. It also provides warnings about false negatives and false positives.
-        Parameters:
-        - num_epochs (int): Number of training epochs (default: 1)
-        - train_batch_size (int): Batch size for training (default: 1)
-        - eval_batch_size (int): Batch size for evaluation (default: 1)
-        - coreset_sampling_ratio (float): Coreset sampling ratio for Patchcore (default
-        - backbone (str): Backbone for Patchcore (default: "efficientnet_b5")
-        - layers (list): List of layers for Patchcore (default: ["blocks.4", "blocks.6"])
+    Applies the Patchcore model. If custom_weights_path is provided, it loads the backbone weights
+    resulting from transfer learning before proceeding with feature extraction.
     """
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="lightning.*")
     warnings.filterwarnings("ignore", message=".*persistent_workers=True.*")
     logging.getLogger("lightning.pytorch").setLevel(logging.ERROR)
     logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
     torch.set_float32_matmul_precision('medium')
+    
     load_dotenv()
     hf_token = os.getenv("HUGGING_FACE_HUB_TOKEN")
     wandb_api_key = os.getenv("WANDB_API_KEY")
-    wandb.login(key=wandb_api_key)
-    login(token=hf_token)
+    if wandb_api_key:
+        wandb.login(key=wandb_api_key)
+    if hf_token:
+        login(token=hf_token)
+        
     print("Applying Patchcore model...")
     config = load_config("config.yaml")
-    dataset_cfg = config.get("paths", {})
+    patchcore_cfg = config.get("patchcore_configuration", {})
+    datamodule_cfg = config.get("datamodule_configruation", {})
     gen_config = config.get("general_configuration", {})
     
     datamodule = Folder(
         name="textiles",
-        root=dataset_cfg.get("root", "./data"),
-        normal_dir=dataset_cfg.get("train_path", "./data/train").replace("./data/", ""),
-        abnormal_dir=dataset_cfg.get("test_reject_path", "./data/test/reject").replace("./data/", ""),
-        normal_test_dir=dataset_cfg.get("test_good_path", "./data/test/good").replace("./data/", ""),
+        root=datamodule_cfg.get("root", "./data"),
+        normal_dir=datamodule_cfg.get("train_dir", "./data/dataset_patchcore/train").replace("./data/", ""),
+        abnormal_dir=datamodule_cfg.get("test_dir_reject", "./data/dataset_patchcore/test/reject").replace("./data/", ""),
+        normal_test_dir=datamodule_cfg.get("test_dir_good", "./data/dataset_patchcore/test/good").replace("./data/", ""),
         extensions=tuple(gen_config.get("valid_extensions", [".bmp",".BMP"])),
-        train_batch_size=train_batch_size,
-        eval_batch_size=eval_batch_size
+        train_batch_size=patchcore_cfg.get("train_batch_size", 32),
+        eval_batch_size=patchcore_cfg.get("eval_batch_size", 32)
     )
-
     datamodule.setup()
 
     logger = AnomalibWandbLogger(project="anomaly-REDA", name="patchcore-run")
-    """ callbacks = [
-        ModelCheckpoint(
-            dirpath="checkpoints", 
-            filename="patchcore-latest"
-        ),
-        TimerCallback()
-    ] """
     checkpoint_callback = ModelCheckpoint(
         dirpath="checkpoints",
         filename="patchcore-latest",
-        monitor="val_loss"
     )
     timer_callback = TimerCallback()
+    
     print("Initializing Patchcore model...")
-
     model = Patchcore(
-        backbone= backbone,
+        backbone=backbone,
         layers=layers,
-        coreset_sampling_ratio=coreset_sampling_ratio,
-        num_neighbors=num_nearest_neighbors,
+        coreset_sampling_ratio=patchcore_cfg.get("coreset_sampling_ratio", 0.1),
+        num_neighbors=patchcore_cfg.get("num_nearest_neighbors", 9),
     )
 
+    # --- WEIGHTS INTEGRATION ---
+    if custom_weights_path and os.path.exists(custom_weights_path):
+        print(f"Loading custom weights from: {custom_weights_path}")
+        state_dict = torch.load(custom_weights_path, map_location="cpu")
+        
+        # Extract expected keys from Anomalib
+        anomalib_state_dict = model.state_dict()
+        adapted_state_dict = {}
+        
+        # Dynamic key mapping (Standard PyTorch -> Anomalib Wrapper)
+        for custom_key, tensor in state_dict.items():
+            for anomalib_key in anomalib_state_dict.keys():
+                # If the original key (e.g. 'conv1.weight') is contained in the anomalib one
+                # (e.g. 'model.feature_extractor.backbone.conv1.weight'), perform the assignment
+                if custom_key in anomalib_key:
+                    adapted_state_dict[anomalib_key] = tensor
+                    break
+                    
+        # Loading with strict=False (ignores FC/ProjectionHead layers that PatchCore doesn't use)
+        missing_keys, unexpected_keys = model.load_state_dict(adapted_state_dict, strict=False)
+        print(f"Custom weights injected. Adapted layers: {len(adapted_state_dict)}/{len(state_dict)}")
+    else:
+        print("Custom weights not found or path not provided. Using default ImageNet weights.")
+
     engine = Engine(
-        max_epochs=num_epochs,          
+        max_epochs=patchcore_cfg["num_epochs"],          
         logger=logger,
         accelerator="gpu",
         callbacks=[checkpoint_callback, timer_callback]        
@@ -91,7 +104,9 @@ def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, c
     print("Evaluating Patchcore model...")
     engine.test(model=model, datamodule=datamodule)
     print("Evaluation completed.")
+    
     engine.trainer.save_checkpoint("checkpoints/patchcore-tested.ckpt")
+    
     print("\nExtracting predictions for the Confusion Matrix...")
     predictions = engine.predict(model=model, dataloaders=datamodule.test_dataloader())
 
@@ -114,8 +129,8 @@ def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, c
     print("="*65)
     print(f"                            | True: GOOD (0)     | True: DEFECT (1)")
     print("-" * 65)
-    print(f" Predicted: GOOD (0)        | [ TP: {tp:<4} ]    | [ FP: {fp:<4} ] ")
-    print(f" Predicted: DEFECT (1)      | [ FN: {fn:<4} ]    | [ TN: {tn:<4} ] ")
+    print(f" Predicted: GOOD (0)        | [ TP: {tp:<4} ]       | [ FP: {fp:<4} ] ")
+    print(f" Predicted: DEFECT (1)      | [ FN: {fn:<4} ]       | [ TN: {tn:<4} ] ")
     print("="*65)
     print(f"    Accuracy    : {acc*100:>6.2f}%")
     print(f"    Precision   : {prec*100:>6.2f}% (When it rejects, it is an actual defect {prec*100:.0f}% of the time)")
@@ -128,7 +143,7 @@ def apply_patchcore_model(num_epochs=1, train_batch_size=1, eval_batch_size=1, c
     if fp > 0:
         print(f"NOTE: The model generated {fp} False Positives (Good parts rejected/scrapped).")
 
-def export_checkpoint_to_onnx(ckpt_path, export_dir, backbone, layers):
+def export_checkpoint_to_onnx(ckpt_path, export_dir):
     """
     Function that export the model in ONNX format
 
@@ -139,8 +154,12 @@ def export_checkpoint_to_onnx(ckpt_path, export_dir, backbone, layers):
     - layers: layers used for the model
     """
     print(f"Initializing checkpoint load from: {ckpt_path}")
-        
-    model = Patchcore(backbone=backbone, layers=layers)
+    config = load_config()
+    model_architecture = config["model_architecture"]
+    model = Patchcore( 
+        backbone=model_architecture["backbone"], 
+        layers=model_architecture["layers"]
+        )
     engine = Engine()
 
     original_onnx_export = torch.onnx.export
@@ -181,18 +200,4 @@ def export_checkpoint_to_onnx(ckpt_path, export_dir, backbone, layers):
 
 if __name__ == "__main__":
     config = load_config()
-    argparser = argparse.ArgumentParser(description="Run the export onnx pipeline")
-    argparser.add_argument(
-        "--backbone", 
-        type=str.lower, 
-        default="efficientnet_b5", 
-        help="Backbone for Patchcore (ex. 'efficientnet_b5'). Ignored if baseline is EfficientAD."
-    )
-    argparser.add_argument(
-        "--layers", 
-        type=str, 
-        default="blocks.4,blocks.6", 
-        help="Comma-separated layers for Patchcore (ex. 'blocks.4,blocks.6'). Ignored if baseline is EfficientAD."
-    )
-    args = argparser.parse_args()
-    export_checkpoint_to_onnx(ckpt_path=config["paths"]["checkpoint_destination"], export_dir=config["paths"]["exports_onnx_path"], backbone=args.backbone, layers=args.layers.split(","))
+    export_checkpoint_to_onnx(ckpt_path=config["paths"]["checkpoint_destination"], export_dir=config["paths"]["exports_onnx_path"])

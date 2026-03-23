@@ -27,6 +27,41 @@ dataset_pipeline:
     textile_waves_range: [0.5, 0.8]
     textile_force_range: [0.0, 60.0]
 
+model_architecture:
+  backbone: "wide_resnet50_2"
+  layers: ["layer2", "layer3"]
+
+transfer_learning:
+  data_dir: "./data/dataset_supcon"     
+  num_epochs: 20                        
+  batch_size: 16                        
+  learning_rate: 0.0001                 
+  temperature: 0.07                     
+  out_dim: 128                          
+  save_path: "custom_weights/resnet_finetuned.pth"
+
+datamodule_configruation:
+  root: "./data"
+  train_dir: "./data/dataset_patchcore/train"
+  test_dir_good: "./data/dataset_patchcore/test/good"
+  test_dir_reject: "./data/dataset_patchcore/test/reject"
+
+patchcore_configuration:
+  num_epochs: 1
+  train_batch_size: 32
+  eval_batch_size: 32
+  coreset_sampling_ratio: 0.1
+  num_nearest_neighbors: 9
+  
+efficientad_settings:
+  num_epochs: 100           
+  train_batch_size: 8       
+  eval_batch_size: 8
+  model_size: "s"           
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  num_workers: 4
+
 paths:
   pca_cumulative_variance_plot_path: "results/EDA/pca_cumulative_variance.png"
   pca_lda_analysis_plot_path: "results/EDA/pca_lda_analysis.png"

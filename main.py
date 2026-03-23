@@ -3,101 +3,64 @@ from src.anomaly_patchcore import apply_patchcore_model, export_checkpoint_to_on
 from src.anomaly_ead import train_efficientad
 import argparse
 from src.config import load_config
-from pathlib import Path
+from src.transfer_learning import train_custom_resnet
 
 def main():
     config = load_config()
     argparser = argparse.ArgumentParser(description="Run the Anomaly Detection Pipeline")
+    
     argparser.add_argument(
         "--create-dataset",
-        default=False ,
+        default=False,
         action="store_true",
         help="Whether to create the dataset before training"
-        )
+    )
     argparser.add_argument(
         "--baseline",
         type=str.lower,
         choices=["efficientad", "patchcore"],
         default="efficientad",
-        help="Select the modol to execute: 'efficientad' or 'patchcore'"
+        help="Select the model to execute: 'efficientad' or 'patchcore'"
     )
     argparser.add_argument(
-        "--num-epochs",
-        type=int,
-        default=100,
-        help="Numbers of epochs (ex. 100 for EAD, 1 for Patchcore)"
+        "--run-transfer-learning",
+        default=False,
+        action="store_true",
+        help="Run the backbone (ResNet) fine-tuning before launching the Anomaly Detection model."
     )
-    argparser.add_argument(
-        "--train-batch-size",
-        type=int,
-        default=8,
-        help="Training batch size"
-    )
-    argparser.add_argument(
-        "--eval-batch-size",
-        type=int,
-        default=8,
-        help="Test batch size"
-    )
-    argparser.add_argument(
-        "--model-size",
-        type=str.lower,
-        choices=["s", "m"],
-        default="s",
-        help="Student-teacher model size for EfficientAD (S or M). Ignored if baseline is Patchcore."
-    )
-    argparser.add_argument(
-        "--coreset-sampling-ratio",
-        type=float,
-        default=0.1,
-        help="Coreset sampling ratio for Patchcore (ex. 0.1 means 10% of patches). Ignored if baseline is EfficientAD."
-    )
-    argparser.add_argument(
-        "--backbone",
-        type=str.lower,
-        default="efficientnet_b5",
-        help="Backbone for Patchcore (ex. 'efficientnet_b5'). Ignored if baseline is EfficientAD."
-    )
-    argparser.add_argument(
-        "--layers",
-        type=str,
-        default="blocks.4,blocks.6",
-        help="Comma-separated layers for Patchcore (ex. 'blocks.4,blocks.6'). Ignored if baseline is EfficientAD."
-    )
-    argparser.add_argument(
-        "--learning-rate",
-        type=float,
-        default=1e-4,
-        help="Learning rate for EfficientAD training. Ignored if baseline is Patchcore."
-    )
-    argparser.add_argument(
-        "--weight-decay",
-        type=float,
-        default=1e-5,
-        help="Weight decay for EfficientAD training. Ignored if baseline is Patchcore."
-    )
-    argparser.add_argument(
-        "--num-workers",
-        type=int,
-        default=4,
-        help="Number of workers for data loading. Ignored if baseline is Patchcore."
-    )
-    argparser.add_argument(
-        "--num-nearest-neighbors",
-        type=int,
-        default=5,
-        help="Number of workers for data loading. Ignored if baseline is Patchcore."
-    )
+    
     args = argparser.parse_args()
 
     if args.create_dataset:
+        print("Starting dataset creation...")
         build_mutually_exclusive_datasets()
 
+    if args.run_transfer_learning:
+        print("Starting Transfer Learning phase (Supervised Contrastive)...")
+        train_custom_resnet(config)
+
+    custom_weights = config["transfer_learning"]["save_path"]
+
     if args.baseline == "patchcore":
-        apply_patchcore_model(args.num_epochs, args.train_batch_size, args.eval_batch_size, args.coreset_sampling_ratio, backbone=args.backbone, layers=args.layers.split(","), num_nearest_neighbors=args.num_nearest_neighbors)
-        export_checkpoint_to_onnx(ckpt_path=config["paths"]["checkpoint_destination"], export_dir=config["paths"]["exports_onnx_path"], backbone=args.backbone, layers=args.layers.split(","))
+        print("Starting PatchCore training...")
+        backbone_name = config["model_architecture"]["backbone"]
+        layers = config["model_architecture"]["layers"]
+        
+        apply_patchcore_model(
+            backbone=backbone_name,
+            layers=layers,
+            custom_weights_path=custom_weights
+        )
+        export_checkpoint_to_onnx(
+            ckpt_path=config["paths"]["checkpoint_destination"], 
+            export_dir=config["paths"]["exports_onnx_path"]
+        )
+        
     elif args.baseline == "efficientad":
-        train_efficientad(args.num_epochs, args.train_batch_size, args.eval_batch_size, args.model_size, args.learning_rate, args.weight_decay, args.num_workers)
+        print("Starting EfficientAD training...")
+        train_efficientad(
+            custom_weights_path=custom_weights
+        )
 
 if __name__ == "__main__":
     main()

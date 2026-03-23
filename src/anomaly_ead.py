@@ -16,21 +16,20 @@ from anomalib.models.image.efficient_ad.lightning_model import EfficientAdModelS
 from torchvision.transforms import Compose, Resize, ToTensor, Normalize
 from anomalib.pre_processing import PreProcessor
 
-def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, model_size="s", learning_rate=1e-4, weight_decay=1e-5, num_workers=4):
+def train_efficientad(custom_weights_path=None):
     """
-    Function to train the EfficientAD model on the textile dataset. It sets up the data, initializes the model, and runs the training and evaluation loop. After testing, it extracts predictions to compute and display a detailed confusion matrix along with accuracy, precision, recall, and F1-score metrics. It also provides warnings about false negatives and false positives.
-        Parameters:
-        - num_epochs (int): Number of training epochs (default: 100)
-        - train_batch_size (int): Batch size for training (default: 8)
-        - eval_batch_size (int): Batch size for evaluation (default: 8)
-        - model_size (str): Size of the EfficientAD model, either "s" for small or "m" for medium (default: "s")
-        - learning_rate (float): Learning rate for the optimizer (default: 1e-4)
-        - weight_decay (float): Weight decay for the optimizer (default: 1e-
+    Function to train the EfficientAD model on the textile dataset. 
+    It reads parameters dynamically from config.yaml and supports custom weights injection.
+    
+    Args:
+        custom_weights_path (str, optional): Path to a .pth file containing pre-trained weights.
+                                             Note: EfficientAD uses a custom PDN architecture, 
+                                             so standard ResNet weights will be mostly ignored.
     """
     # Optimization for RTX A4000 Tensor Cores
     torch.set_float32_matmul_precision('medium')
     
-    # Credentials
+    # Load credentials
     load_dotenv()
     hf_token = os.getenv("HUGGING_FACE_HUB_TOKEN")
     wandb_api_key = os.getenv("WANDB_API_KEY")
@@ -41,26 +40,37 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
     
     # Read Configuration
     config = load_config("config.yaml")
-    dataset_cfg = config.get("paths", {})
+    datamodule_cfg = config.get("datamodule_configruation", {})
     gen_config = config.get("general_configuration", {})
+    ead_cfg = config.get("efficientad_settings", {})
+    
+    num_epochs = ead_cfg.get("num_epochs", 100)
+    train_batch_size = ead_cfg.get("train_batch_size", 8)
+    eval_batch_size = ead_cfg.get("eval_batch_size", 8)
+    model_size = ead_cfg.get("model_size", "s")
+    learning_rate = ead_cfg.get("learning_rate", 1e-4)
+    weight_decay = ead_cfg.get("weight_decay", 1e-5)
+    num_workers = ead_cfg.get("num_workers", 4)
+    img_size = gen_config.get("image_size", [256, 256])
     
     print("Setting up Dataset for EfficientAD...")
     transform = Compose([
-        Resize((256, 256)),
+        Resize(tuple(img_size)),
         ToTensor(),
         Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     pre_processor = PreProcessor(transform=transform)
+    
     datamodule = Folder(
         name="textiles_ead",
-        root=dataset_cfg.get("root", "./data"),
-        normal_dir=dataset_cfg.get("train_path", "./data/train").replace("./data/", ""),
-        abnormal_dir=dataset_cfg.get("test_reject_path", "./data/test/reject").replace("./data/", ""),
-        normal_test_dir=dataset_cfg.get("test_good_path", "./data/test/good").replace("./data/", ""),
+        root=datamodule_cfg.get("root", "./data"),
+        normal_dir=datamodule_cfg.get("train_path", "./data/train").replace("./data/", ""),
+        abnormal_dir=datamodule_cfg.get("test_reject_path", "./data/test/reject").replace("./data/", ""),
+        normal_test_dir=datamodule_cfg.get("test_good_path", "./data/test/good").replace("./data/", ""),
         extensions=tuple(gen_config.get("valid_extensions", [".bmp",".BMP"])),
         train_batch_size=train_batch_size,
         eval_batch_size=eval_batch_size,
-        num_workers=4,
+        num_workers=num_workers,
         pre_process=pre_processor
     )
     datamodule.setup()
@@ -69,23 +79,44 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
     
     checkpoint_callback = ModelCheckpoint(
         dirpath="checkpoints",
-        filename="patchcore-latest",
+        filename="efficientad-latest",
         monitor="val_loss"
     )
     timer_callback = TimerCallback()
 
-    
-    print(f"Initializing EfficientAD model ({model_size} size)...")
+    print(f"Initializing EfficientAD model ({model_size.upper()} size)...")
     if model_size.upper().startswith("S"):
         enum_size = EfficientAdModelSize.S
     else:
         enum_size = EfficientAdModelSize.M
+        
     model = EfficientAd(
         model_size = enum_size,
         lr = learning_rate,
         weight_decay = weight_decay,
-
     )
+
+    # --- WEIGHTS INJECTION ---
+    if custom_weights_path and os.path.exists(custom_weights_path):
+        print(f"Loading custom weights from: {custom_weights_path}")
+        state_dict = torch.load(custom_weights_path, map_location="cpu")
+        
+        anomalib_state_dict = model.state_dict()
+        adapted_state_dict = {}
+        
+        # Dynamic key mapping
+        for custom_key, tensor in state_dict.items():
+            for anomalib_key in anomalib_state_dict.keys():
+                if custom_key in anomalib_key:
+                    adapted_state_dict[anomalib_key] = tensor
+                    break
+                    
+        missing_keys, unexpected_keys = model.load_state_dict(adapted_state_dict, strict=False)
+        print(f"Custom weights injected. Adapted layers: {len(adapted_state_dict)}/{len(state_dict)}")
+        if len(adapted_state_dict) == 0:
+            print("WARNING: No keys matched. This happens if you pass ResNet weights to a PDN architecture.")
+    else:
+        print("Using default initialized weights.")
 
     def custom_configure_optimizers(self):
         optimizer = optim.AdamW(
@@ -93,9 +124,8 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
             lr=learning_rate, 
             weight_decay=weight_decay
         )
-    
+        # Cosine Annealing scheduler scales learning rate over epochs
         scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs)
-        
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
@@ -105,9 +135,9 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
             }
         }
     
+    # Override standard optimizer with the custom one
     model.__class__.configure_optimizers = custom_configure_optimizers
 
-    # Set 100 epochs to allow the Student network to learn the textures properly
     engine = Engine(
         max_epochs=num_epochs, 
         logger=logger,
@@ -124,20 +154,20 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
     print("Evaluating the model...")
     engine.test(model=model, datamodule=datamodule)
     print("Evaluation completed.")
+    
     print("\nExtracting predictions for the Confusion Matrix...")
     predictions = engine.predict(model=model, dataloaders=datamodule.test_dataloader())
 
     y_true = []
     y_pred = []
 
-    # Extract the real labels and the ones predicted by the model
+    # Extract real labels and predicted labels
     for batch in predictions:
         y_true.extend(batch.gt_label.cpu().numpy())
         y_pred.extend(batch.pred_label.cpu().numpy())
 
-    # Calculate Confusion Matrix
+    # Calculate metrics
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
-
     acc = accuracy_score(y_true, y_pred)
     prec = precision_score(y_true, y_pred, zero_division=0)
     rec = recall_score(y_true, y_pred, zero_division=0)
@@ -148,8 +178,8 @@ def train_efficientad(num_epochs=100, train_batch_size=8, eval_batch_size=8, mod
     print("="*65)
     print(f"                            | True: GOOD (0)               | True: DEFECT (1)")
     print("-" * 65)
-    print(f" Predicted: GOOD (0)        | [ TN: {tp:<4} ] (Accepted)     | [ FP: {fp:<4} ] (False Alarms)")
-    print(f" Predicted: DEFECT (1)      | [ FN: {fn:<4} ] (Miss/Escape)  | [ TP: {tn:<4} ] (Found) ")
+    print(f" Predicted: GOOD (0)        | [ TP: {tp:<4} ]    | [ FP: {fp:<4} ]")
+    print(f" Predicted: DEFECT (1)      | [ FN: {fn:<4} ]    | [ TN: {tn:<4} ]")
     print("="*65)
     print(f"    Accuracy    : {acc*100:>6.2f}%")
     print(f"    Precision   : {prec*100:>6.2f}% (When it rejects, it is an actual defect {prec*100:.0f}% of the time)")

@@ -5,7 +5,19 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms, models
 import torch.nn.functional as F
 import os
+from config import load_config
 
+def process_five_crops(crops):
+    """
+    Module-level function to process crops. 
+    Required because lambda functions cannot be pickled by Windows multiprocessing.
+    """
+    crop_transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    return torch.stack([crop_transform(crop) for crop in crops])
 
 class SupConLoss(nn.Module):
     """Supervised Contrastive Learning: https://arxiv.org/pdf/2004.11362.pdf.
@@ -18,18 +30,6 @@ class SupConLoss(nn.Module):
         self.base_temperature = base_temperature
 
     def forward(self, features, labels=None, mask=None):
-        """Compute loss for model. If both `labels` and `mask` are None,
-        it degenerates to SimCLR unsupervised loss:
-        https://arxiv.org/pdf/2002.05709.pdf
-
-        Args:
-            features: hidden vector of shape [bsz, n_views, ...].
-            labels: ground truth of shape [bsz].
-            mask: contrastive mask of shape [bsz, bsz], mask_{i,j}=1 if sample j
-                has the same class as sample i. Can be asymmetric.
-        Returns:
-            A loss scalar.
-        """
         device = (torch.device('cuda')
                   if features.is_cuda
                   else torch.device('cpu'))
@@ -64,17 +64,14 @@ class SupConLoss(nn.Module):
         else:
             raise ValueError('Unknown mode: {}'.format(self.contrast_mode))
 
-        # compute logits
         anchor_dot_contrast = torch.div(
             torch.matmul(anchor_feature, contrast_feature.T),
             self.temperature)
-        # for numerical stability
+        
         logits_max, _ = torch.max(anchor_dot_contrast, dim=1, keepdim=True)
         logits = anchor_dot_contrast - logits_max.detach()
 
-        # tile mask
         mask = mask.repeat(anchor_count, contrast_count)
-        # mask-out self-contrast cases
         logits_mask = torch.scatter(
             torch.ones_like(mask),
             1,
@@ -83,22 +80,13 @@ class SupConLoss(nn.Module):
         )
         mask = mask * logits_mask
 
-        # compute log_prob
         exp_logits = torch.exp(logits) * logits_mask
         log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True))
 
-        # compute mean of log-likelihood over positive
-        # modified to handle edge cases when there is no positive pair
-        # for an anchor point. 
-        # Edge case e.g.:- 
-        # features of shape: [4,1,...]
-        # labels:            [0,1,1,2]
-        # loss before mean:  [nan, ..., ..., nan] 
         mask_pos_pairs = mask.sum(1)
-        mask_pos_pairs = torch.where(mask_pos_pairs < 1e-6, 1, mask_pos_pairs)
+        mask_pos_pairs = torch.where(mask_pos_pairs < 1e-6, 1.0, mask_pos_pairs)
         mean_log_prob_pos = (mask * log_prob).sum(1) / mask_pos_pairs
 
-        # loss
         loss = - (self.temperature / self.base_temperature) * mean_log_prob_pos
         loss = loss.view(anchor_count, batch_size).mean()
 
@@ -118,47 +106,69 @@ class ProjectionHead(nn.Module):
         x = self.head(x)    
         return F.normalize(x, dim=1)
 
-def train_custom_resnet(data_dir, num_epochs=10, batch_size=16):
+def train_custom_resnet(config_dict):
     """
-    Function that train a custom resnet with a transfer learning approach.
-    Parameters:
-        - data_dir: directory where there is the dataset for the training
-        - num_classes: in the trasfer lerning approach for AD the NN must be trained as for a binary classification where the two classes are good and reject. The number of classes for AD must be setted to 2
-        - num_epochs: number of epochs for which iterate the training loop. In transfer learning approach, it is not necessary to use a high value of training epochs
-        - batch_size: number of images that are processed in parallel
+    Function that trains a custom backbone using parameters from config.yaml.
     """
-    # Transformation to adapt the input images to the input that is expected by the resnet (224x224)
-    # To preserve the image resolution a five crop approach is used (4 corners and 1 center crop)
+    tl_config = config_dict['transfer_learning']
+    model_config = config_dict['model_architecture']
+    
+    data_dir = tl_config['data_dir']
+    num_epochs = tl_config['num_epochs']
+    batch_size = tl_config['batch_size']
+    lr = tl_config['learning_rate']
+    temperature = tl_config['temperature']
+    out_dim = tl_config['out_dim']
+    save_path = tl_config['save_path']
+    backbone_name = model_config['backbone']
+
     transform = transforms.Compose([
         transforms.FiveCrop(256),
-        transforms.Lambda(lambda crops: torch.stack([
-            transforms.Compose([
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            ])(crop) for crop in crops
-        ]))
+        transforms.Lambda(process_five_crops)
     ])
 
-    dataset = datasets.ImageFolder(root=data_dir,transform=transform)
+    dataset = datasets.ImageFolder(root=data_dir, transform=transform)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
+    print(f"Loading backbone: {backbone_name}")
+    try:
+        # Dynamic loading using recent torchvision APIs (weights='DEFAULT')
+        model_func = getattr(models, backbone_name)
+        model = model_func(weights='DEFAULT')
+    except AttributeError:
+        raise ValueError(f"Backbone '{backbone_name}' not supported by torchvision.models")
 
-    model = models.wide_resnet50_2(weights=models.Wide_ResNet50_2_Weights.DEFAULT)
-
-    in_features = model.fc.in_features
-    model.fc = ProjectionHead(in_features=in_features, out_dim=128)
-
-    for name, param in model.named_parameters():
-        if name.startswith('conv1') or name.startswith('bn1') or name.startswith('layer1'):
-            param.requires_grad = False
+    # Dynamic adaptation of the classification head based on the architecture
+    if hasattr(model, 'fc'):
+        # ResNet-style architectures
+        in_features = model.fc.in_features
+        model.fc = ProjectionHead(in_features=in_features, out_dim=out_dim)
+        
+        for name, param in model.named_parameters():
+            if name.startswith('conv1') or name.startswith('bn1') or name.startswith('layer1'):
+                param.requires_grad = False
+                
+    elif hasattr(model, 'classifier'):
+        # EfficientNet / MobileNet-style architectures
+        if isinstance(model.classifier, nn.Sequential):
+            in_features = model.classifier[-1].in_features
+            model.classifier[-1] = ProjectionHead(in_features=in_features, out_dim=out_dim)
+        else:
+            in_features = model.classifier.in_features
+            model.classifier = ProjectionHead(in_features=in_features, out_dim=out_dim)
+            
+        for name, param in model.named_parameters():
+            if name.startswith('features.0') or name.startswith('features.1') or name.startswith('features.2'):
+                param.requires_grad = False
+    else:
+        print("Warning: Unknown model architecture. No head modification applied.")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
-    criterion = SupConLoss(temperature=0.07)
+    criterion = SupConLoss(temperature=temperature)
 
-    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4)
+    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
     scaler = torch.amp.GradScaler(device.type)
 
     print(f"Starting training on {device} for {num_epochs} epochs...")
@@ -167,13 +177,9 @@ def train_custom_resnet(data_dir, num_epochs=10, batch_size=16):
     for epoch in range(num_epochs):
         running_loss = 0.0
         for images, labels in dataloader:
-            # FiveCrop input: [batch_size, 5, 3, 224, 224]
             bs, n_views, c, h, w = images.size()
-            
-            # Input flattening
-            # Wide_Resnet50_2 accept only 4 dimensions: [batch_size * 5, 3, 224, 224]
             images_flat = images.view(-1, c, h, w).to(device)
-            labels = labels.to(device) # NON replicare più le etichette!
+            labels = labels.to(device)
 
             optimizer.zero_grad()
 
@@ -189,12 +195,17 @@ def train_custom_resnet(data_dir, num_epochs=10, batch_size=16):
             running_loss += loss.item()
             
         print(f"Epoch [{epoch+1}/{num_epochs}] - Loss: {running_loss/len(dataloader):.4f}")
-    model.fc = nn.Identity()
+    
+    # Restore the final layer to Identity to save only the weights useful for PatchCore
+    if hasattr(model, 'fc'):
+        model.fc = nn.Identity()
+    elif hasattr(model, 'classifier'):
+        model.classifier = nn.Identity()
 
-    os.makedirs("custom_weights", exist_ok=True)
-    save_path = "custom_weights/resnet_finetuned.pth"
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     torch.save(model.state_dict(), save_path)
-    print(f"Custom weights sucessfully saved: {save_path}")
+    print(f"Custom weights successfully saved: {save_path}")
 
 if __name__ == "__main__":
-    train_custom_resnet(data_dir="./dataset_classificazione", num_classes=3, num_epochs=20, batch_size=16)
+    config = load_config() 
+    train_custom_resnet(config)

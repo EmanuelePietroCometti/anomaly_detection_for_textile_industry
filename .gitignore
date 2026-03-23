@@ -63,3 +63,4 @@ wandb/
 *.sqlite3
 *.sqlite
 *.db
+custom_weights/

@@ -3,3 +3,4 @@ from anomaly_patchcore import apply_patchcore_model, export_checkpoint_to_onnx
 from anomaly_ead import train_efficientad
 from config import load_config
 from eda import extract_features, plot_interactive_tsne, realistic_pca_lda_analysis, analyze_pca_variance
+from transfer_learning import train_custom_resnet
