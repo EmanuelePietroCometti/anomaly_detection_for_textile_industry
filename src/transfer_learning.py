@@ -3,208 +3,217 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms, models
-import torch.nn.functional as F
 import os
 from config import load_config
+from torchmetrics.classification import BinaryAUROC
 
-def process_five_crops(crops):
+class DenseBackboneWrapper(nn.Module):
     """
-    Module-level function to process crops. 
-    Required because lambda functions cannot be pickled by Windows multiprocessing.
+    Wrapper to remove Global Average Pooling and apply a 1x1 convolutional head
+    for dense (spatial) classification.
     """
-    crop_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-    return torch.stack([crop_transform(crop) for crop in crops])
-
-class SupConLoss(nn.Module):
-    """Supervised Contrastive Learning: https://arxiv.org/pdf/2004.11362.pdf.
-    It also supports the unsupervised contrastive loss in SimCLR"""
-    def __init__(self, temperature=0.07, contrast_mode='all',
-                 base_temperature=0.07):
-        super(SupConLoss, self).__init__()
-        self.temperature = temperature
-        self.contrast_mode = contrast_mode
-        self.base_temperature = base_temperature
-
-    def forward(self, features, labels=None, mask=None):
-        device = (torch.device('cuda')
-                  if features.is_cuda
-                  else torch.device('cpu'))
-
-        if len(features.shape) < 3:
-            raise ValueError('`features` needs to be [bsz, n_views, ...],'
-                             'at least 3 dimensions are required')
-        if len(features.shape) > 3:
-            features = features.view(features.shape[0], features.shape[1], -1)
-
-        batch_size = features.shape[0]
-        if labels is not None and mask is not None:
-            raise ValueError('Cannot define both `labels` and `mask`')
-        elif labels is None and mask is None:
-            mask = torch.eye(batch_size, dtype=torch.float32).to(device)
-        elif labels is not None:
-            labels = labels.contiguous().view(-1, 1)
-            if labels.shape[0] != batch_size:
-                raise ValueError('Num of labels does not match num of features')
-            mask = torch.eq(labels, labels.T).float().to(device)
-        else:
-            mask = mask.float().to(device)
-
-        contrast_count = features.shape[1]
-        contrast_feature = torch.cat(torch.unbind(features, dim=1), dim=0)
-        if self.contrast_mode == 'one':
-            anchor_feature = features[:, 0]
-            anchor_count = 1
-        elif self.contrast_mode == 'all':
-            anchor_feature = contrast_feature
-            anchor_count = contrast_count
-        else:
-            raise ValueError('Unknown mode: {}'.format(self.contrast_mode))
-
-        anchor_dot_contrast = torch.div(
-            torch.matmul(anchor_feature, contrast_feature.T),
-            self.temperature)
+    def __init__(self, backbone_name):
+        super(DenseBackboneWrapper, self).__init__()
+        print(f"Loading backbone: {backbone_name}")
         
-        logits_max, _ = torch.max(anchor_dot_contrast, dim=1, keepdim=True)
-        logits = anchor_dot_contrast - logits_max.detach()
+        try:
+            model_func = getattr(models, backbone_name)
+            self.backbone = model_func(weights='DEFAULT')
+        except AttributeError:
+            raise ValueError(f"Backbone '{backbone_name}' not supported by torchvision.models")
 
-        mask = mask.repeat(anchor_count, contrast_count)
-        logits_mask = torch.scatter(
-            torch.ones_like(mask),
-            1,
-            torch.arange(batch_size * anchor_count).view(-1, 1).to(device),
-            0
-        )
-        mask = mask * logits_mask
+        # Automatically detect and disable Pooling/FC layers
+        if hasattr(self.backbone, 'classifier'):
+            if isinstance(self.backbone.classifier, nn.Sequential):
+                in_features = self.backbone.classifier[-1].in_features
+            else:
+                in_features = self.backbone.classifier.in_features
+            self.backbone.classifier = nn.Identity()
+            if hasattr(self.backbone, 'avgpool'):
+                self.backbone.avgpool = nn.Identity()
+            self.arch_type = 'features'
+            
+        elif hasattr(self.backbone, 'fc'):
+            in_features = self.backbone.fc.in_features
+            self.backbone.fc = nn.Identity()
+            if hasattr(self.backbone, 'avgpool'):
+                self.backbone.avgpool = nn.Identity()
+            self.arch_type = 'resnet'
+        else:
+            raise ValueError("Unknown backbone architecture.")
 
-        exp_logits = torch.exp(logits) * logits_mask
-        log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True))
-
-        mask_pos_pairs = mask.sum(1)
-        mask_pos_pairs = torch.where(mask_pos_pairs < 1e-6, 1.0, mask_pos_pairs)
-        mean_log_prob_pos = (mask * log_prob).sum(1) / mask_pos_pairs
-
-        loss = - (self.temperature / self.base_temperature) * mean_log_prob_pos
-        loss = loss.view(anchor_count, batch_size).mean()
-
-        return loss
-    
-class ProjectionHead(nn.Module):
-    def __init__(self, in_features=2048, hidden_dim=2048, out_dim=128):
-        super(ProjectionHead, self).__init__()
-        self.head = nn.Sequential(
-            nn.Linear(in_features, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
+        # Spatial Projection Head (1x1 Convolutions)
+        self.dense_head = nn.Sequential(
+            nn.Conv2d(in_features, 256, kernel_size=1),
+            nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
-            nn.Linear(hidden_dim, out_dim)
+            nn.Conv2d(256, 1, kernel_size=1) # Output: 1 channel for anomaly probability
         )
 
     def forward(self, x):
-        x = self.head(x)    
-        return F.normalize(x, dim=1)
+        # Extract features keeping spatial topology [Batch, Channels, Height, Width]
+        if self.arch_type == 'features':
+            features = self.backbone.features(x)
+        else:
+            x = self.backbone.conv1(x)
+            x = self.backbone.bn1(x)
+            x = self.backbone.relu(x)
+            x = self.backbone.maxpool(x)
+            x = self.backbone.layer1(x)
+            x = self.backbone.layer2(x)
+            x = self.backbone.layer3(x)
+            features = self.backbone.layer4(x)
+            
+        # Spatial logits [Batch, 1, Height, Width]
+        logits_map = self.dense_head(features)
+        return logits_map
+
+def apply_selective_freezing(model):
+    """
+    Freeze early feature extractors and unfreeze mid/late layers used by PatchCore.
+    """
+    for name, param in model.backbone.named_parameters():
+        param.requires_grad = False 
+        
+        if model.arch_type == 'features' and "features" in name:
+            try:
+                block_idx = int(name.split('.')[1])
+                # Unfreeze intermediate EfficientNet blocks (e.g., from 4 onwards)
+                if block_idx >= 4:  
+                    param.requires_grad = True
+            except ValueError:
+                pass
+        elif model.arch_type == 'resnet' and "layer" in name:
+            if "layer3" in name or "layer4" in name:
+                param.requires_grad = True
+                
+    # Always train the dense head
+    for param in model.dense_head.parameters():
+        param.requires_grad = True
 
 def train_custom_resnet(config_dict):
-    """
-    Function that trains a custom backbone using parameters from config.yaml.
-    """
     tl_config = config_dict['transfer_learning']
     model_config = config_dict['model_architecture']
     
     data_dir = tl_config['data_dir']
+    # Fallback to 'val' if val_data_dir is not explicitly set in config
+    val_data_dir = tl_config.get('val_data_dir', data_dir.replace('train', 'val'))
+    
     num_epochs = tl_config['num_epochs']
     batch_size = tl_config['batch_size']
     lr = tl_config['learning_rate']
-    temperature = tl_config['temperature']
-    out_dim = tl_config['out_dim']
     save_path = tl_config['save_path']
     backbone_name = model_config['backbone']
 
-    transform = transforms.Compose([
-        transforms.FiveCrop(256),
-        transforms.Lambda(process_five_crops)
+    # Train transforms with RandomCrop for local feature focus
+    train_transform = transforms.Compose([
+        transforms.Resize((256, 256)),
+        transforms.RandomCrop(224),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    dataset = datasets.ImageFolder(root=data_dir, transform=transform)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    # Validation transforms: deterministic CenterCrop
+    val_transform = transforms.Compose([
+        transforms.Resize((256, 256)),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
 
-    print(f"Loading backbone: {backbone_name}")
-    try:
-        # Dynamic loading using recent torchvision APIs (weights='DEFAULT')
-        model_func = getattr(models, backbone_name)
-        model = model_func(weights='DEFAULT')
-    except AttributeError:
-        raise ValueError(f"Backbone '{backbone_name}' not supported by torchvision.models")
+    train_dataset = datasets.ImageFolder(root=data_dir, transform=train_transform)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
-    # Dynamic adaptation of the classification head based on the architecture
-    if hasattr(model, 'fc'):
-        # ResNet-style architectures
-        in_features = model.fc.in_features
-        model.fc = ProjectionHead(in_features=in_features, out_dim=out_dim)
-        
-        for name, param in model.named_parameters():
-            if name.startswith('conv1') or name.startswith('bn1') or name.startswith('layer1'):
-                param.requires_grad = False
-                
-    elif hasattr(model, 'classifier'):
-        # EfficientNet / MobileNet-style architectures
-        if isinstance(model.classifier, nn.Sequential):
-            in_features = model.classifier[-1].in_features
-            model.classifier[-1] = ProjectionHead(in_features=in_features, out_dim=out_dim)
-        else:
-            in_features = model.classifier.in_features
-            model.classifier = ProjectionHead(in_features=in_features, out_dim=out_dim)
-            
-        for name, param in model.named_parameters():
-            if name.startswith('features.0') or name.startswith('features.1') or name.startswith('features.2'):
-                param.requires_grad = False
-    else:
-        print("Warning: Unknown model architecture. No head modification applied.")
+    val_dataset = datasets.ImageFolder(root=val_data_dir, transform=val_transform)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
+    model = DenseBackboneWrapper(backbone_name).to(device)
+    apply_selective_freezing(model)
 
-    criterion = SupConLoss(temperature=temperature)
-
+    # BCE Loss to map probability on each spatial pixel
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
     scaler = torch.amp.GradScaler(device.type)
 
-    print(f"Starting training on {device} for {num_epochs} epochs...")
-    model.train()
+    # Spatial AUROC Metric initialization
+    spatial_auroc_metric = BinaryAUROC().to(device)
+
+    print(f"Starting Dense Training on {device} for {num_epochs} epochs...")
+    best_val_auroc = 0.0
     
     for epoch in range(num_epochs):
-        running_loss = 0.0
-        for images, labels in dataloader:
-            bs, n_views, c, h, w = images.size()
-            images_flat = images.view(-1, c, h, w).to(device)
-            labels = labels.to(device)
+        # ==========================
+        # TRAINING PHASE
+        # ==========================
+        model.train()
+        train_running_loss = 0.0
+        
+        for images, labels in train_dataloader:
+            images = images.to(device)
+            labels = labels.to(device).float()
 
             optimizer.zero_grad()
 
             with torch.amp.autocast(device_type=device.type):
-                features_flat = model(images_flat) 
-                features_3d = features_flat.view(bs, n_views, -1)
-                loss = criterion(features_3d, labels)
+                logits_map = model(images) 
+                
+                # Dynamic spatial label expansion
+                B, _, H, W = logits_map.shape
+                spatial_labels = labels.view(B, 1, 1, 1).expand(B, 1, H, W)
+                
+                loss = criterion(logits_map, spatial_labels)
             
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
             
-            running_loss += loss.item()
+            train_running_loss += loss.item()
             
-        print(f"Epoch [{epoch+1}/{num_epochs}] - Loss: {running_loss/len(dataloader):.4f}")
-    
-    # Restore the final layer to Identity to save only the weights useful for PatchCore
-    if hasattr(model, 'fc'):
-        model.fc = nn.Identity()
-    elif hasattr(model, 'classifier'):
-        model.classifier = nn.Identity()
+        train_loss = train_running_loss / len(train_dataloader)
 
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    torch.save(model.state_dict(), save_path)
-    print(f"Custom weights successfully saved: {save_path}")
+        # ==========================
+        # VALIDATION PHASE
+        # ==========================
+        model.eval()
+        val_running_loss = 0.0
+        spatial_auroc_metric.reset()
+        
+        with torch.no_grad():
+            for val_images, val_labels in val_dataloader:
+                val_images = val_images.to(device)
+                val_labels = val_labels.to(device)
+
+                with torch.amp.autocast(device_type=device.type):
+                    val_logits_map = model(val_images)
+                    
+                    B, _, H, W = val_logits_map.shape
+                    val_spatial_labels = val_labels.view(B, 1, 1, 1).expand(B, 1, H, W)
+                    
+                    v_loss = criterion(val_logits_map, val_spatial_labels.float())
+                    
+                val_running_loss += v_loss.item()
+
+                # Metric Update
+                val_probs_map = torch.sigmoid(val_logits_map)
+                preds_flat = val_probs_map.view(-1)
+                labels_flat = val_spatial_labels.reshape(-1).long()
+                
+                spatial_auroc_metric.update(preds_flat, labels_flat)
+                
+        val_loss = val_running_loss / len(val_dataloader)
+        epoch_auroc = spatial_auroc_metric.compute().item()
+        
+        print(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val Spatial AUROC: {epoch_auroc:.4f}")
+
+        # Model Checkpointing based on AUROC
+        if epoch_auroc > best_val_auroc:
+            best_val_auroc = epoch_auroc
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            torch.save(model.backbone.state_dict(), save_path)
+            print(f" -> New AUROC peak! Backbone weights saved to: {save_path}")
 
 if __name__ == "__main__":
     config = load_config() 

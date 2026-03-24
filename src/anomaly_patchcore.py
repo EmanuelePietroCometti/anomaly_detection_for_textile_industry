@@ -4,6 +4,7 @@ from anomalib.models import Patchcore
 from anomalib.engine import Engine
 from anomalib.callbacks import ModelCheckpoint, TimerCallback
 from anomalib.loggers import AnomalibWandbLogger
+from anomalib.data.utils import ValSplitMode
 from dotenv import load_dotenv
 import wandb
 from huggingface_hub import login
@@ -47,7 +48,9 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
         normal_test_dir=datamodule_cfg.get("test_dir_good", "./data/dataset_patchcore/test/good").replace("./data/", ""),
         extensions=tuple(gen_config.get("valid_extensions", [".bmp",".BMP"])),
         train_batch_size=patchcore_cfg.get("train_batch_size", 32),
-        eval_batch_size=patchcore_cfg.get("eval_batch_size", 32)
+        eval_batch_size=patchcore_cfg.get("eval_batch_size", 32),
+        val_split_mode=ValSplitMode.FROM_TEST,
+        val_split_ratio=0.3
     )
     datamodule.setup()
 
@@ -94,7 +97,7 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
         max_epochs=patchcore_cfg["num_epochs"],          
         logger=logger,
         accelerator="gpu",
-        callbacks=[checkpoint_callback, timer_callback]        
+        callbacks=[checkpoint_callback, timer_callback]
     )
 
     print("Starting training with Patchcore model...")
@@ -127,10 +130,10 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
     print("\n" + "="*65)
     print(" DETAILED REPORT: CONFUSION MATRIX")
     print("="*65)
-    print(f"                            | True: GOOD (0)     | True: DEFECT (1)")
+    print(f"                            | True: DEFECT     | True: GOOD ")
     print("-" * 65)
-    print(f" Predicted: GOOD (0)        | [ TP: {tp:<4} ]       | [ FP: {fp:<4} ] ")
-    print(f" Predicted: DEFECT (1)      | [ FN: {fn:<4} ]       | [ TN: {tn:<4} ] ")
+    print(f" Predicted: DEFECT          | [ TP: {tp:<4} ]    | [ FP: {fp:<4} ] ")
+    print(f" Predicted: GOOD            | [ FN: {fn:<4} ]    | [ TN: {tn:<4} ] ")
     print("="*65)
     print(f"    Accuracy    : {acc*100:>6.2f}%")
     print(f"    Precision   : {prec*100:>6.2f}% (When it rejects, it is an actual defect {prec*100:.0f}% of the time)")
@@ -145,58 +148,55 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
 
 def export_checkpoint_to_onnx(ckpt_path, export_dir):
     """
-    Function that export the model in ONNX format
-
-    Args:
-    - ckpt_path: path of the checkpoint directory
-    - export_dir: directory where the onnx file will be saved
-    - backbone: backbone used in training 
-    - layers: layers used for the model
+    Exports the PatchCore model to ONNX format using the official Anomalib API.
     """
-    print(f"Initializing checkpoint load from: {ckpt_path}")
+    print(f"Loading configuration and initializing model...")
     config = load_config()
-    model_architecture = config["model_architecture"]
+    model_arch = config["model_architecture"]
+    
+    img_size = tuple(config["general_configuration"]["image_size"])
+
     model = Patchcore( 
-        backbone=model_architecture["backbone"], 
-        layers=model_architecture["layers"]
-        )
+        backbone=model_arch["backbone"], 
+        layers=model_arch["layers"]
+    )
+    
     engine = Engine()
 
-    original_onnx_export = torch.onnx.export
-
-    def patched_onnx_export(*args, **kwargs):
-        kwargs["dynamic_axes"] = {
+    onnx_params = {
+        "input_names": ["input"],
+        "output_names": ["score", "anomaly_map"],
+        "opset_version": 14,
+        "dynamic_axes": {
             "input": {0: "batch_size"},
-            "output": {0: "batch_size"}
-        }
+            "score": {0: "batch_size"},
+            "anomaly_map": {0: "batch_size"}
+        },
+        "do_constant_folding": True,
+        "dynamo": False
+    }
 
-        kwargs["input_names"] = ["input"]
-        kwargs["output_names"] = ["output"]
-        
-        kwargs["dynamo"] = False 
-        kwargs["opset_version"] = 14
-        
-        return original_onnx_export(*args, **kwargs)
-
-    torch.onnx.export = patched_onnx_export
-
-    print("Starting ONNX conversion...")
+    print(f"Starting official ONNX export with input size {img_size}...")
     try:
         export_path = engine.export(
             model=model,
             export_type=ExportType.ONNX,
             export_root=export_dir,
             ckpt_path=ckpt_path,
-            input_size=(224,224)
+            input_size=img_size,
+            onnx_kwargs=onnx_params
         )
-        print(f"\n[SUCCESS] Model successfully exported to: {export_path}")
+        print(f"\n[SUCCESS] Model exported to: {export_path}")
         
     except Exception as e:
         print(f"\n[ERROR] Export failed: {e}")
-        
-    finally:
-        torch.onnx.export = original_onnx_export
 
+if __name__ == "__main__":
+    config = load_config()
+    export_checkpoint_to_onnx(
+        ckpt_path=config["paths"]["checkpoint_destination"], 
+        export_dir=config["paths"]["exports_onnx_path"]
+    )
 
 if __name__ == "__main__":
     config = load_config()
