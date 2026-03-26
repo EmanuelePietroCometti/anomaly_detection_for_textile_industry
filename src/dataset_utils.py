@@ -4,7 +4,49 @@ import shutil
 import numpy as np
 import albumentations as A
 from pathlib import Path
+import os
 from config import load_config
+
+def split_training_validation(src_dir, dest_train_dir, dest_val_dir):
+    """
+    Helper function that split the dataset into training and validation dataset based on the configuration split ratio
+    """
+    config = load_config()
+    dataset_config = config["dataset_pipeline"]["ratios"]
+    training_ratio = dataset_config["training_ratio"]
+    valid_extensions = config["general_configuration"]["valid_extensions"]
+
+    src_path = Path(src_dir)
+    dest_train_path = Path(dest_train_dir)
+    dest_val_path = Path(dest_val_dir)
+    
+    directories = [
+        d for d in src_path.iterdir() if d.is_dir()
+    ]
+
+    for class_dir in directories:
+        files = [
+            f for f in class_dir.rglob("*")
+            if f.is_file() and f.suffix.lower() in valid_extensions
+        ]
+        random.shuffle(files)
+
+        idx_training = int(len(files)*training_ratio)
+        training_files = files[:idx_training]
+        validation_files = files[idx_training:]
+
+        dest_training_dir = dest_train_path / class_dir.name
+        dest_validation_dir = dest_val_path / class_dir.name
+
+        dest_training_dir.mkdir(parents=True, exist_ok=True)
+        dest_validation_dir.mkdir(parents=True, exist_ok=True)
+
+        for f in training_files:
+            shutil.copy2(f, dest_training_dir/f.name)
+
+        for f in validation_files:
+            shutil.copy2(f, dest_validation_dir/f.name)
+        
 
 def copy_pool(pool, dest_dir):
     """
@@ -135,6 +177,8 @@ def build_mutually_exclusive_datasets():
     valid_extensions = tuple(config["general_configuration"]["valid_extensions"])
 
     # Paths initialization
+    unsplitted_dataset = conf["paths"]["source_unsplitted_dataset"]
+    flag_split_source = conf["split_source"]
     src_training = conf["paths"]["source_training"]
     src_validation = conf["paths"]["source_validation"]
     dest_tl = Path(conf["paths"]["dest_transfer_learning"])
@@ -157,6 +201,11 @@ def build_mutually_exclusive_datasets():
     for folder in [tl_train_good_dir, tl_train_reject_dir, tl_val_good_dir, tl_val_reject_dir,
                    ad_train_good_dir, ad_test_good_dir, ad_test_reject_dir]:
         folder.mkdir(parents=True, exist_ok=True)
+
+    if flag_split_source:
+        print("--- SPLIT SOURCE IN TRAINING AND VALIDATION DIRECTORY ---")
+        split_training_validation(unsplitted_dataset, src_training, src_validation)
+
 
     print("--- EXTRACTING AND SLICING SOURCE DATA (ZERO WASTE POLICY) ---")
 

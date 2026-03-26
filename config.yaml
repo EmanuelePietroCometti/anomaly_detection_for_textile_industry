@@ -3,17 +3,20 @@ general_configuration:
   valid_extensions: [".bmp", ".BMP"]
 
 dataset_pipeline:
+  split_source: True
   paths:
-    source_training: "D:/emanuele/Code/new_source_dataset/Training"
-    source_validation: "D:/emanuele/Code/new_source_dataset/Validation"
+    source_unsplitted_dataset: "D:/emanuele/Code/dataset_source"
+    source_training: "D:/emanuele/Code/dataset_splitted/training"
+    source_validation: "D:/emanuele/Code/dataset_splitted/validation"
     dest_transfer_learning: "./data/dataset_supcon"
     dest_patchcore: "./data/dataset_patchcore"
 
   classes:
-    good_categories: ["cimossa", "dust", "good"]
+    good_categories: ["dust", "good"]
     defect_categories: ["nodi", "paglie"]
 
   ratios:
+    training_ratio: 0.6
     tl_allocation_ratio: 0.30
     good_stress_multiplier: 3
     cimossa_undersampling_ratio: 0.40

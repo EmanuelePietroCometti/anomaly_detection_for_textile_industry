@@ -47,6 +47,7 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
         abnormal_dir=datamodule_cfg.get("test_dir_reject", "./data/dataset_patchcore/test/reject").replace("./data/", ""),
         normal_test_dir=datamodule_cfg.get("test_dir_good", "./data/dataset_patchcore/test/good").replace("./data/", ""),
         extensions=tuple(gen_config.get("valid_extensions", [".bmp",".BMP"])),
+        image_size=tuple(gen_config.get("image_size", [256, 256])),
         train_batch_size=patchcore_cfg.get("train_batch_size", 32),
         eval_batch_size=patchcore_cfg.get("eval_batch_size", 32),
         val_split_mode=ValSplitMode.FROM_TEST,
@@ -130,10 +131,10 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
     print("\n" + "="*65)
     print(" DETAILED REPORT: CONFUSION MATRIX")
     print("="*65)
-    print(f"                            | True: DEFECT     | True: GOOD ")
+    print(f"                            | True: GOOD     | True: DEFECT ")
     print("-" * 65)
-    print(f" Predicted: DEFECT          | [ TP: {tp:<4} ]    | [ FP: {fp:<4} ] ")
-    print(f" Predicted: GOOD            | [ FN: {fn:<4} ]    | [ TN: {tn:<4} ] ")
+    print(f" Predicted: GOOD          | [ TN: {tn:<4} ]    | [ FN: {fn:<4} ] ")
+    print(f" Predicted: DEFECT        | [ FP: {fp:<4} ]    | [ TP: {tp:<4} ] ")
     print("="*65)
     print(f"    Accuracy    : {acc*100:>6.2f}%")
     print(f"    Precision   : {prec*100:>6.2f}% (When it rejects, it is an actual defect {prec*100:.0f}% of the time)")
@@ -167,12 +168,6 @@ def export_checkpoint_to_onnx(ckpt_path, export_dir):
         "input_names": ["input"],
         "output_names": ["score", "anomaly_map"],
         "opset_version": 14,
-        "dynamic_axes": {
-            "input": {0: "batch_size"},
-            "score": {0: "batch_size"},
-            "anomaly_map": {0: "batch_size"}
-        },
-        "do_constant_folding": True,
         "dynamo": False
     }
 
