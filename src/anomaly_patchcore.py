@@ -19,6 +19,7 @@ from lightning.pytorch import seed_everything
 from torchvision.transforms import InterpolationMode
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc
+import shutil
 
 logging.getLogger("lightning.fabric.utilities.seed").setLevel(logging.WARNING)
 logging.getLogger("lightning.fabric").setLevel(logging.ERROR)
@@ -27,6 +28,75 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="lightning
 warnings.filterwarnings("ignore", message=".*persistent_workers=True.*")
 logging.getLogger("lightning.pytorch").setLevel(logging.ERROR)
 torch.set_float32_matmul_precision('medium')
+
+import torch
+from anomalib.metrics import F1AdaptiveThreshold
+
+class TargetRecallThreshold(F1AdaptiveThreshold):
+    """
+    Custom Adaptive Threshold that guarantees a minimum target Recall 
+    while maximizing Precision to minimize false positives (scraps).
+    """
+    def __init__(self, target_recall=0.99, default_value=0.5, **kwargs):
+        super().__init__(default_value=default_value, **kwargs)
+        self.target_recall = target_recall
+
+    def compute(self) -> torch.Tensor:
+        # Compute Precision, Recall, and all possible Thresholds from the PR curve
+        precision, recall, thresholds = self.precision_recall_curve.compute()
+        
+        # Find indices where the model achieves the requested target Recall
+        valid_indices = torch.where(recall >= self.target_recall)[0]
+        
+        if len(valid_indices) > 0:
+            # Filter precision and thresholds using only the safe indices
+            valid_precisions = precision[valid_indices]
+            valid_thresholds = thresholds[valid_indices]
+            
+            # Pick the index with the highest Precision to minimize scraps
+            best_idx = torch.argmax(valid_precisions)
+            self.value = valid_thresholds[best_idx]
+        else:
+            # Fallback: If the target is mathematically unreachable, 
+            # pick the threshold that yields the absolute maximum Recall possible.
+            print(f"\n[WARNING] Target recall {self.target_recall} unreachable. Defaulting to max possible recall.")
+            best_idx = torch.argmax(recall)
+            self.value = thresholds[best_idx]
+            
+        return self.value
+
+def backup_and_cleanup_latest_run(symlink_path, dest_parent_dir, backbone, layers):
+    """
+    Resolves a symlink copies its target directory to a new 
+    custom-named folder, and safely deletes both the original target and the symlink.
+    """
+    config = load_config()
+    dataset_cfg = config["dataset_pipeline"]
+    dataset_version = dataset_cfg["dataset_version"]
+    if not os.path.islink(symlink_path):
+        print(f"[ERROR] '{symlink_path}' is not a valid symbolic link.")
+        return
+
+    real_source_dir = os.path.realpath(symlink_path)
+    print(f"Symlink resolved. Actual source directory: {real_source_dir}")
+
+    timestamp = config["global_timestamp"]
+    layers_str = "_".join(layers) if isinstance(layers, list) else str(layers)
+    new_folder_name = f"{timestamp}_{backbone}_{layers_str}_d{dataset_version}"
+    destination_dir = os.path.join(dest_parent_dir, new_folder_name)
+
+    try:
+        print(f"Copying files to: {destination_dir}")
+        shutil.copytree(real_source_dir, destination_dir, dirs_exist_ok=True)
+        print("[SUCCESS] Backup completed successfully.")
+        print(f"Deleting original directory: {real_source_dir}")
+        shutil.rmtree(real_source_dir)
+        print(f"Removing symlink: {symlink_path}")
+        os.unlink(symlink_path)
+        print("[SUCCESS] Cleanup completed. Only the customized backup remains.")
+
+    except Exception as e:
+        print(f"[ERROR] Process failed: {e}. Original files were NOT deleted.")
 
 def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "blocks.6"], custom_weights_path=None):
     """
@@ -45,34 +115,20 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
     patchcore_cfg = config.get("patchcore_configuration", {})
     datamodule_cfg = config.get("datamodule_configruation", {})
     gen_config = config.get("general_configuration", {})
+    paths = config.get("paths", {})
     
     image_size = gen_config["image_size"]
     crop_size = gen_config["crop_size"]
 
     if "efficientnet" in backbone:
-        train_transform = Compose([
-            Resize(crop_size, interpolation=InterpolationMode.BICUBIC), # I used crop size beacuse this rappresent the right dimension of the image that is expected by efficientnet
-            ToImage(),
-            ToDtype(torch.float32, scale=True),
-            Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-
-        eval_transform = Compose([
+        transform = Compose([
             Resize(crop_size, interpolation=InterpolationMode.BICUBIC), 
             ToImage(),
             ToDtype(torch.float32, scale=True),
             Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
     else:
-        train_transform = Compose([
-            Resize(image_size),
-            RandomCrop(crop_size),
-            ToImage(),
-            ToDtype(torch.float32, scale=True),
-            Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-
-        eval_transform = Compose([
+        transform = Compose([
             Resize(image_size),
             CenterCrop(crop_size),
             ToImage(),
@@ -92,9 +148,6 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
         val_split_mode=ValSplitMode.FROM_TEST,
         val_split_ratio=0.3,
         test_split_mode=TestSplitMode.FROM_DIR,
-        train_augmentations=train_transform,
-        val_augmentations=eval_transform,
-        test_augmentations=eval_transform,
         seed=datamodule_cfg.get("seed", 42)
     )
     datamodule.setup()
@@ -109,6 +162,10 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
         coreset_sampling_ratio=coreset_sampling_ratio,
         num_neighbors=num_neighbors,
     )
+
+    model.transform = transform
+    model.image_threshold = TargetRecallThreshold(target_recall=0.99)
+    model.pixel_threshold = TargetRecallThreshold(target_recall=0.99)
 
     # CUSTOM WEIGHTS INJECTION
     if custom_weights_path and os.path.exists(custom_weights_path):
@@ -166,21 +223,36 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
     rec = recall_score(y_true, y_pred, zero_division=0)
     f1 = f1_score(y_true, y_pred, zero_division=0)
     
-    print(f"\n{'='*65}\n DETAILED REPORT: CONFUSION MATRIX\n{'='*65}")
-    print(f"                            | True: GOOD     | True: DEFECT ")
-    print(f"{'-'*65}")
-    print(f" Predicted: GOOD          | [ TN: {tn:<4} ]    | [ FN: {fn:<4} ] ")
-    print(f" Predicted: DEFECT        | [ FP: {fp:<4} ]    | [ TP: {tp:<4} ] ")
-    print(f"{'='*65}")
-    print(f"    Accuracy    : {acc*100:>6.2f}%")
-    print(f"    Precision   : {prec*100:>6.2f}% (Valid defects when rejected)")
-    print(f"    Recall      : {rec*100:>6.2f}% (True defects found)")
-    print(f"    F1-Score    : {f1:>6.4f}\n{'='*65}\n")
+    report_text = (
+        f"\n{'='*65}\n DETAILED REPORT: CONFUSION MATRIX\n{'='*65}\n"
+        f"                            | Predicted: GOOD     | Predicted: DEFECT \n"
+        f"{'-'*65}\n"
+        f" True: GOOD          | [ TN: {tn:<4} ]    | [ FP: {fp:<4} ] \n"
+        f" True: DEFECT        | [ FN: {fn:<4} ]    | [ TP: {tp:<4} ] \n"
+        f"{'='*65}\n"
+        f"    Accuracy    : {acc*100:>6.2f}%\n"
+        f"    Precision   : {prec*100:>6.2f}% (Valid defects when rejected)\n"
+        f"    Recall      : {rec*100:>6.2f}% (True defects found)\n"
+        f"    F1-Score    : {f1:>6.4f}\n"
+        f"{'='*65}\n"
+    )
 
+    print(report_text)
     if fn > 0:
         print(f"WARNING: Model generated {fn} False Negatives (Missed defects).")
     if fp > 0:
         print(f"NOTE: Model generated {fp} False Positives (Good parts rejected).")
+    timestamp = config["global_timestamp"]
+    report_filename = f"{timestamp}_evaluation_report_{backbone}_{layers}.txt"
+    report_dir = paths.get("report_path", "results/Patchcore/report")
+    os.makedirs(report_dir, exist_ok=True)
+    report_filepath = os.path.join(report_dir, report_filename)
+
+    with open(report_filepath, "w", encoding="utf-8") as file:
+        file.write(report_text)
+
+    print(f"[SUCCESS] Report successfully saved to: {report_filepath}")
+    
 
     # AUROC PLOT GENERATION
     print("Generating AUROC Curve...")
@@ -210,16 +282,19 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
     plt.legend(loc="lower right", fontsize=11)
     plt.grid(True, linestyle=':', alpha=0.7)
 
-    results_dir = os.path.dirname(config["paths"]["pca_cumulative_variance_plot_path"])
+    results_dir = os.path.dirname(config["paths"]["auroc_path"])
     os.makedirs(results_dir, exist_ok=True)
-    
-    filename = f"patchcore_auroc_{backbone}_cr{coreset_sampling_ratio}_nn{num_neighbors}_{layers_str}.png"
+    timestamp = config["global_timestamp"]
+    filename = f"{timestamp}_patchcore_auroc_{backbone}_cr{coreset_sampling_ratio}_nn{num_neighbors}_{layers_str}.png"
     plot_path = os.path.join(results_dir, filename)
     
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
     
     print(f"[SUCCESS] AUROC Curve exported successfully to: {plot_path}")
+    anomaly_images = paths.get("anomaly_images")
+    symlink_path = paths["symlink_path"]
+    backup_and_cleanup_latest_run(symlink_path, anomaly_images, backbone, layers)
 
 def export_checkpoint_to_onnx(ckpt_path, export_dir):
     """
@@ -228,8 +303,10 @@ def export_checkpoint_to_onnx(ckpt_path, export_dir):
     config = load_config()
     model_arch = config["model_architecture"]
     img_size = tuple(config["general_configuration"]["crop_size"]) ## I used the crop size because the effective size of the input images is the crop size
+    backbone=model_arch["backbone"]
+    layers=model_arch["layers"]
 
-    model = Patchcore(backbone=model_arch["backbone"], layers=model_arch["layers"])
+    model = Patchcore(backbone=backbone, layers=layers)
     engine = Engine()
 
     print(f"Starting ONNX export with input size {img_size}...")
@@ -240,14 +317,28 @@ def export_checkpoint_to_onnx(ckpt_path, export_dir):
             export_type=ExportType.ONNX,
             export_root=export_dir,
             ckpt_path=ckpt_path,
-            input_size=img_size
+            input_size=img_size,
+            onnx_kwargs={
+                "dynamo": False,
+            }
         )
+        timestamp = config["global_timestamp"]
+        directory, original_filename = os.path.split(export_path)
+        name, extension = os.path.splitext(original_filename)
+    
+        # Convert list to a safe string format
+        layers_str = "_".join(layers) if isinstance(layers, list) else str(layers)
+        
+        # Build the new filename safely
+        new_filename = f"{timestamp}_{name}_{backbone}_{layers_str}{extension}"
+        new_export_path = os.path.join(directory, new_filename)
+        os.rename(export_path, new_export_path)
+        
         print(f"\n[SUCCESS] Model exported to: {export_path}")
     except Exception as e:
         print(f"\n[ERROR] Export failed: {e}")
 
 if __name__ == "__main__":
-    # Removed the duplicated block to prevent double execution calls
     config = load_config()
     export_checkpoint_to_onnx(
         ckpt_path=config["paths"]["checkpoint_destination"], 

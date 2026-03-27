@@ -1,9 +1,10 @@
 general_configuration:
-  image_size: [384, 384]
-  crop_size: [380, 380] # If the backbone is "efficientnet" the crop_size is setted as the size of the model's input
+  image_size: [256, 256]
+  crop_size: [224, 224] # If the backbone is "efficientnet" the crop_size is setted as the size of the model's input
   valid_extensions: [".bmp", ".BMP"]
 
 dataset_pipeline:
+  dataset_version: 1.0.0
   split_source: True
   seed: 42
   paths:
@@ -14,13 +15,13 @@ dataset_pipeline:
     dest_patchcore: "./data/dataset_patchcore"
 
   classes:
-    good_categories: ["dust", "good"]
+    good_categories: ["good"]
     defect_categories: ["nodi", "paglie"]
 
   ratios:
     training_ratio: 0.6
     tl_allocation_ratio: 0.30
-    good_stress_multiplier: 3
+    good_stress_multiplier: 1
     cimossa_undersampling_ratio: 0.40
     good_limit_patchcore: 500
 
@@ -30,21 +31,21 @@ dataset_pipeline:
     prob_rot_180: 0.5
     prob_stress: 0.5
     textile_intensity_range: [0.2, 0.6]
-    textile_waves_range: [0.5, 0.8]
-    textile_force_range: [0.0, 60.0]
+    textile_waves_range: [0.5, 0.7]
+    textile_force_range: [0.0, 40.0]
 
 model_architecture:
   backbone: "efficientnet_b4"
-  layers: ["blocks.1", "blocks.2"]
+  layers: ["blocks.3", "blocks.4"]
 
 transfer_learning:
   data_dir: "./data/dataset_supcon"     
-  num_epochs: 20                        
+  num_epochs: 10                        
   batch_size: 16                        
   learning_rate: 0.0001                 
   temperature: 0.07                     
   out_dim: 128                          
-  save_path: "custom_weights/efficientnet_finetuned.pth"
+  save_dir: "custom_weights"
 
 datamodule_configruation:
   root: "./data"
@@ -54,10 +55,10 @@ datamodule_configruation:
 
 patchcore_configuration:
   num_epochs: 1
-  train_batch_size: 32
-  eval_batch_size: 32
+  train_batch_size: 16
+  eval_batch_size: 16
   coreset_sampling_ratio: 0.1
-  num_nearest_neighbors: 15
+  num_nearest_neighbors: 9
   
 efficientad_settings:
   num_epochs: 100           
@@ -69,6 +70,9 @@ efficientad_settings:
   num_workers: 4
 
 paths:
+  symlink_path: "results/Patchcore/textiles/latest"
+  anomaly_images: "results/Patchcore/anomaly_images"
+  report_path: "results/Patchcore/report"
   auroc_path: "results/Patchcore/AUROC"
   pca_cumulative_variance_plot_path: "results/EDA/pca_cumulative_variance.png"
   pca_lda_analysis_plot_path: "results/EDA/pca_lda_analysis.png"

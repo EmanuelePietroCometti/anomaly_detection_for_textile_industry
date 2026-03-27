@@ -75,7 +75,7 @@ def apply_selective_freezing(model):
         if model.head_name in name:
             param.requires_grad = True
 
-def train_custom_resnet(config_dict):
+def apply_transfer_learning(config_dict):
     tl_config = config_dict['transfer_learning']
     model_config = config_dict['model_architecture']
     
@@ -85,7 +85,7 @@ def train_custom_resnet(config_dict):
     num_epochs = tl_config['num_epochs']
     batch_size = tl_config['batch_size']
     lr = tl_config['learning_rate']
-    save_path = tl_config['save_path']
+    save_dir = tl_config['save_dir']
     backbone_name = model_config['backbone']
 
     gen_config = config_dict.get("general_configuration", {})
@@ -141,7 +141,9 @@ def train_custom_resnet(config_dict):
 
     print(f"Starting Training on {device} for {num_epochs} epochs...")
     best_val_auroc = 0.0
-    
+    timestamp = config_dict["global_timestamp"]
+    custom_filename = f"{timestamp}_{backbone_name}_best_model.pth"
+    full_save_path = os.path.join(save_dir, custom_filename)
     for epoch in range(num_epochs):
         # ==========================
         # TRAINING PHASE
@@ -194,14 +196,14 @@ def train_custom_resnet(config_dict):
         
         print(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val AUROC: {epoch_auroc:.4f}")
 
-        # Model Checkpointing based on AUROC
         if epoch_auroc > best_val_auroc:
             best_val_auroc = epoch_auroc
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            # Save the entire backbone state dict (which Patchcore will easily load)
-            torch.save(model.backbone.state_dict(), save_path)
-            print(f" -> New AUROC peak! Backbone weights saved to: {save_path}")
+    
+            os.makedirs(save_dir, exist_ok=True)
+            
+            torch.save(model.backbone.state_dict(), full_save_path)
+            print(f" -> New AUROC peak! Backbone weights saved to: {full_save_path}")
 
 if __name__ == "__main__":
     config = load_config() 
-    train_custom_resnet(config)
+    apply_transfer_learning(config)

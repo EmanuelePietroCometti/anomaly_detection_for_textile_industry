@@ -205,6 +205,7 @@ def build_mutually_exclusive_datasets():
     if flag_split_source:
         print("--- SPLIT SOURCE IN TRAINING AND VALIDATION DIRECTORY ---")
         split_training_validation(unsplitted_dataset, src_training, src_validation)
+        print("Source dataset splitted into traingin and validation")
 
 
     print("--- EXTRACTING AND SLICING SOURCE DATA (ZERO WASTE POLICY) ---")
@@ -265,6 +266,7 @@ def build_mutually_exclusive_datasets():
         copy_pool(ad_train_good, ad_train_good_dir)
     copy_pool(ad_test_good, ad_test_good_dir)
     copy_pool(ad_test_defect, ad_test_reject_dir)
+    print("Source data extracted and sliced")
 
     print("\n--- GENERATING INVARIANCE FOR NORMAL IMAGES (STRESS TEST) ---")
     stress_multiplier = conf["ratios"].get("good_stress_multiplier", 1)

@@ -9,7 +9,7 @@ from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 from sklearn.metrics import make_scorer,f1_score, balanced_accuracy_score, accuracy_score
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
-from sklearn.model_selection import StratifiedKFold, cross_validate
+from sklearn.model_selection import cross_validate
 import seaborn as sns
 from config import load_config
 from sklearn.preprocessing import StandardScaler
