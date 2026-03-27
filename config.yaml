@@ -31,7 +31,7 @@ dataset_pipeline:
     textile_force_range: [0.0, 60.0]
 
 model_architecture:
-  backbone: "wide_resnet50_2"
+  backbone: "resnet18"
   layers: ["layer2", "layer3"]
 
 transfer_learning:
@@ -51,10 +51,10 @@ datamodule_configruation:
 
 patchcore_configuration:
   num_epochs: 1
-  train_batch_size: 32
-  eval_batch_size: 32
-  coreset_sampling_ratio: 0.2
-  num_nearest_neighbors: 15
+  train_batch_size: 64
+  eval_batch_size: 64
+  coreset_sampling_ratio: 0.05
+  num_nearest_neighbors: 5
   
 efficientad_settings:
   num_epochs: 100           
