@@ -1,9 +1,11 @@
 general_configuration:
-  image_size: [512, 512]
+  image_size: [384, 384]
+  crop_size: [380, 380] # If the backbone is "efficientnet" the crop_size is setted as the size of the model's input
   valid_extensions: [".bmp", ".BMP"]
 
 dataset_pipeline:
   split_source: True
+  seed: 42
   paths:
     source_unsplitted_dataset: "D:/emanuele/Code/dataset_source"
     source_training: "D:/emanuele/Code/dataset_splitted/training"
@@ -20,6 +22,7 @@ dataset_pipeline:
     tl_allocation_ratio: 0.30
     good_stress_multiplier: 3
     cimossa_undersampling_ratio: 0.40
+    good_limit_patchcore: 500
 
   augmentation_params:
     prob_h_flip: 0.5
@@ -31,8 +34,8 @@ dataset_pipeline:
     textile_force_range: [0.0, 60.0]
 
 model_architecture:
-  backbone: "resnet18"
-  layers: ["layer2", "layer3"]
+  backbone: "efficientnet_b4"
+  layers: ["blocks.1", "blocks.2"]
 
 transfer_learning:
   data_dir: "./data/dataset_supcon"     
@@ -41,7 +44,7 @@ transfer_learning:
   learning_rate: 0.0001                 
   temperature: 0.07                     
   out_dim: 128                          
-  save_path: "custom_weights/resnet_finetuned.pth"
+  save_path: "custom_weights/efficientnet_finetuned.pth"
 
 datamodule_configruation:
   root: "./data"
@@ -51,10 +54,10 @@ datamodule_configruation:
 
 patchcore_configuration:
   num_epochs: 1
-  train_batch_size: 64
-  eval_batch_size: 64
-  coreset_sampling_ratio: 0.05
-  num_nearest_neighbors: 5
+  train_batch_size: 32
+  eval_batch_size: 32
+  coreset_sampling_ratio: 0.1
+  num_nearest_neighbors: 15
   
 efficientad_settings:
   num_epochs: 100           
@@ -66,6 +69,7 @@ efficientad_settings:
   num_workers: 4
 
 paths:
+  auroc_path: "results/Patchcore/AUROC"
   pca_cumulative_variance_plot_path: "results/EDA/pca_cumulative_variance.png"
   pca_lda_analysis_plot_path: "results/EDA/pca_lda_analysis.png"
   interactive_tsne_plot_path: "results/EDA/interactive_tsne_plot.png"

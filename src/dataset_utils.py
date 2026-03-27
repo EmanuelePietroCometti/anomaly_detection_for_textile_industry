@@ -257,7 +257,12 @@ def build_mutually_exclusive_datasets():
     copy_pool(tl_val_good, tl_val_good_dir)
     copy_pool(tl_val_defect, tl_val_reject_dir)
 
-    copy_pool(ad_train_good, ad_train_good_dir)
+    ad_good_limit = conf["ratios"]["good_limit_patchcore"]
+    if len(ad_train_good) > ad_good_limit:
+        ad_train_good=random.sample(ad_train_good, ad_good_limit)
+        copy_pool(ad_train_good, ad_train_good_dir)
+    else:
+        copy_pool(ad_train_good, ad_train_good_dir)
     copy_pool(ad_test_good, ad_test_good_dir)
     copy_pool(ad_test_defect, ad_test_reject_dir)
 

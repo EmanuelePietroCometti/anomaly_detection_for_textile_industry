@@ -36,8 +36,9 @@ def main():
         build_mutually_exclusive_datasets()
 
     if args.run_transfer_learning:
-        print("Starting Transfer Learning phase (Supervised Contrastive)...")
+        print("Starting Transfer Learning...")
         train_custom_resnet(config)
+        print("Transfer Learning completed!")
 
     custom_weights = config["transfer_learning"]["save_path"]
 
@@ -51,6 +52,7 @@ def main():
             layers=layers,
             custom_weights_path=custom_weights
         )
+        print("Patchcore completed")
         export_checkpoint_to_onnx(
             ckpt_path=config["paths"]["checkpoint_destination"], 
             export_dir=config["paths"]["exports_onnx_path"]
@@ -61,6 +63,7 @@ def main():
         train_efficientad(
             custom_weights_path=custom_weights
         )
+        print("EfficientAD completed!")
 
 if __name__ == "__main__":
     main()
