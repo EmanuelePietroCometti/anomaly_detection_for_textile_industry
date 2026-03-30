@@ -4,8 +4,6 @@ from anomalib.data import Folder
 from anomalib.engine import Engine
 from anomalib.loggers import AnomalibWandbLogger
 from anomalib.callbacks import ModelCheckpoint, TimerCallback
-
-# NEW: Import the visualization modules
 from src.visualization import save_evaluation_report, plot_auroc_curve
 
 def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
@@ -64,7 +62,7 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         y_pred.extend(batch.pred_label.cpu().numpy())
         y_scores.extend(batch.pred_score.cpu().numpy())
 
-    # 5. Delegate Reporting and Plotting
+    # Delegate Reporting and Plotting
     save_evaluation_report(y_true, y_pred, model_name, backbone, config)
     plot_auroc_curve(y_true, y_scores, model_name, backbone, layers_str, config)
     
