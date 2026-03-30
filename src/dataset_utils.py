@@ -4,8 +4,7 @@ import shutil
 import numpy as np
 import albumentations as A
 from pathlib import Path
-import os
-from config import load_config
+from src.config import load_config
 
 def split_training_validation(src_dir, dest_train_dir, dest_val_dir):
     """

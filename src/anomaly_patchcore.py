@@ -3,7 +3,7 @@ import torch
 from anomalib.models import Patchcore
 from torchvision.transforms.v2 import Compose, Resize, ToImage, ToDtype, Normalize, CenterCrop
 from torchvision.transforms import InterpolationMode
-from metrics import TargetRecallThreshold
+from src.metrics import TargetRecallThreshold
 
 
 def configure_patchcore(config, custom_weights_path=None):

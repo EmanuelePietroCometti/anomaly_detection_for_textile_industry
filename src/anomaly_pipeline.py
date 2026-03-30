@@ -10,7 +10,7 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     """
     Unified pipeline to handle data loading, training, and evaluation.
     """
-    datamodule_cfg = config.get("datamodule_configruation", {})
+    datamodule_cfg = config.get("datamodule_configuration", {})
     gen_config = config.get("general_configuration", {})
     model_arch = config.get("model_architecture", {})
     
@@ -26,7 +26,7 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         normal_dir=datamodule_cfg.get("train_dir", "train/good"),
         abnormal_dir=datamodule_cfg.get("test_dir_reject", "test/reject"),
         normal_test_dir=datamodule_cfg.get("test_dir_good", "test/good"),
-        extensions=tuple(gen_config.get("valid_extensions", [".bmp"])),
+        extensions=tuple(gen_config.get("valid_extensions", [".bmp", ".BMP"])),
         train_batch_size=datamodule_cfg.get("train_batch_size", 32),
         eval_batch_size=datamodule_cfg.get("eval_batch_size", 32),
     )
