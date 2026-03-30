@@ -36,7 +36,8 @@ dataset_pipeline:
 
 model_architecture:
   backbone: "efficientnet_b4"
-  layers: ["blocks.3", "blocks.4"]
+  layers: ["blocks.1", "blocks.2"]
+  weights: "DEFAULT"
 
 transfer_learning:
   data_dir: "./data/dataset_supcon"     
@@ -57,7 +58,7 @@ patchcore_configuration:
   num_epochs: 1
   train_batch_size: 16
   eval_batch_size: 16
-  coreset_sampling_ratio: 0.1
+  coreset_sampling_ratio: 0.01
   num_nearest_neighbors: 9
   
 efficientad_settings:
@@ -74,9 +75,7 @@ paths:
   anomaly_images: "results/Patchcore/anomaly_images"
   report_path: "results/Patchcore/report"
   auroc_path: "results/Patchcore/AUROC"
-  pca_cumulative_variance_plot_path: "results/EDA/pca_cumulative_variance.png"
-  pca_lda_analysis_plot_path: "results/EDA/pca_lda_analysis.png"
-  interactive_tsne_plot_path: "results/EDA/interactive_tsne_plot.png"
+  eda_path: "results/EDA"
   benchmark_pareto_front_patchcore: "results/benchmark/benchmark_pareto_front_patchcore.csv"
   benchmark_pareto_front_efficientad: "results/benchmark/benchmark_pareto_front_efficientad.csv"
   checkpoint_destination: "checkpoints/patchcore-tested.ckpt"

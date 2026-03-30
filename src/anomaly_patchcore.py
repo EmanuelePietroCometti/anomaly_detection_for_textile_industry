@@ -20,6 +20,7 @@ from torchvision.transforms import InterpolationMode
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc
 import shutil
+from pathlib import Path
 
 logging.getLogger("lightning.fabric.utilities.seed").setLevel(logging.WARNING)
 logging.getLogger("lightning.fabric").setLevel(logging.ERROR)
@@ -32,13 +33,18 @@ torch.set_float32_matmul_precision('medium')
 import torch
 from anomalib.metrics import F1AdaptiveThreshold
 
+import torch
+from anomalib.metrics import F1AdaptiveThreshold
+
 class TargetRecallThreshold(F1AdaptiveThreshold):
     """
     Custom Adaptive Threshold that guarantees a minimum target Recall 
     while maximizing Precision to minimize false positives (scraps).
     """
     def __init__(self, target_recall=0.99, default_value=0.5, **kwargs):
-        super().__init__(default_value=default_value, **kwargs)
+        fields = kwargs.pop("fields", ["pred_score", "gt_label"])
+        
+        super().__init__(fields=fields, **kwargs)
         self.target_recall = target_recall
 
     def compute(self) -> torch.Tensor:
@@ -65,25 +71,24 @@ class TargetRecallThreshold(F1AdaptiveThreshold):
             
         return self.value
 
-def backup_and_cleanup_latest_run(symlink_path, dest_parent_dir, backbone, layers):
+def backup_and_cleanup_latest_run(symlink_path, dest_parent_dir, backbone, layers, config):
     """
     Resolves a symlink copies its target directory to a new 
     custom-named folder, and safely deletes both the original target and the symlink.
     """
-    config = load_config()
     dataset_cfg = config["dataset_pipeline"]
     dataset_version = dataset_cfg["dataset_version"]
     if not os.path.islink(symlink_path):
         print(f"[ERROR] '{symlink_path}' is not a valid symbolic link.")
         return
 
-    real_source_dir = os.path.realpath(symlink_path)
+    real_source_dir = Path(symlink_path)
     print(f"Symlink resolved. Actual source directory: {real_source_dir}")
 
     timestamp = config["global_timestamp"]
     layers_str = "_".join(layers) if isinstance(layers, list) else str(layers)
     new_folder_name = f"{timestamp}_{backbone}_{layers_str}_d{dataset_version}"
-    destination_dir = os.path.join(dest_parent_dir, new_folder_name)
+    destination_dir = Path(dest_parent_dir) / new_folder_name
 
     try:
         print(f"Copying files to: {destination_dir}")
@@ -98,7 +103,7 @@ def backup_and_cleanup_latest_run(symlink_path, dest_parent_dir, backbone, layer
     except Exception as e:
         print(f"[ERROR] Process failed: {e}. Original files were NOT deleted.")
 
-def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "blocks.6"], custom_weights_path=None):
+def apply_patchcore_model(config, backbone="efficientnet_b5", layers=["blocks.4", "blocks.6"], custom_weights_path=None):
     """
     Applies the Patchcore model. Loads custom weights if provided.
     Patchcore is a memory-bank model, so no multi-epoch training is required.
@@ -111,7 +116,6 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
         login(token=os.getenv("HUGGING_FACE_HUB_TOKEN"))
         
     print("Loading configurations...")
-    config = load_config("config.yaml")
     patchcore_cfg = config.get("patchcore_configuration", {})
     datamodule_cfg = config.get("datamodule_configruation", {})
     gen_config = config.get("general_configuration", {})
@@ -282,11 +286,11 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
     plt.legend(loc="lower right", fontsize=11)
     plt.grid(True, linestyle=':', alpha=0.7)
 
-    results_dir = os.path.dirname(config["paths"]["auroc_path"])
+    results_dir = Path(config["paths"]["auroc_path"])
     os.makedirs(results_dir, exist_ok=True)
     timestamp = config["global_timestamp"]
     filename = f"{timestamp}_patchcore_auroc_{backbone}_cr{coreset_sampling_ratio}_nn{num_neighbors}_{layers_str}.png"
-    plot_path = os.path.join(results_dir, filename)
+    plot_path = results_dir / filename
     
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -294,13 +298,12 @@ def apply_patchcore_model(backbone="efficientnet_b5", layers=["blocks.4", "block
     print(f"[SUCCESS] AUROC Curve exported successfully to: {plot_path}")
     anomaly_images = paths.get("anomaly_images")
     symlink_path = paths["symlink_path"]
-    backup_and_cleanup_latest_run(symlink_path, anomaly_images, backbone, layers)
+    backup_and_cleanup_latest_run(symlink_path, anomaly_images, backbone, layers, config)
 
-def export_checkpoint_to_onnx(ckpt_path, export_dir):
+def export_checkpoint_to_onnx(ckpt_path, export_dir, config):
     """
     Exports the trained PatchCore model to ONNX.
     """
-    config = load_config()
     model_arch = config["model_architecture"]
     img_size = tuple(config["general_configuration"]["crop_size"]) ## I used the crop size because the effective size of the input images is the crop size
     backbone=model_arch["backbone"]
