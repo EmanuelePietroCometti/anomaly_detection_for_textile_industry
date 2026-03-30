@@ -19,7 +19,6 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     layers = model_arch.get("layers", ["custom_layers"])
     layers_str = "_".join(layers) if isinstance(layers, list) else str(layers)
     
-    # Setup Datamodule
     datamodule = Folder(
         name="textiles_dataset",
         root=datamodule_cfg.get("root", "./data"),
@@ -32,7 +31,6 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     )
     datamodule.setup()
 
-    # Setup Engine
     logger = AnomalibWandbLogger(project=project_name, name=model_name)
     checkpoint_callback = ModelCheckpoint(dirpath="checkpoints", filename=f"{model_name}-latest")
     
@@ -45,25 +43,35 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         accelerator="auto"
     )
 
-    # Fit and Test
     print(f"\n--- Training {model_name} ---")
     engine.fit(model=model, datamodule=datamodule)
     
     print(f"\n--- Evaluating {model_name} ---")
-    engine.test(model=model, datamodule=datamodule)
+    test_results = engine.test(model=model, datamodule=datamodule)
 
-    # Extract Predictions
     print("\nExtracting predictions for Metrics and AUROC...")
     predictions = engine.predict(model=model, dataloaders=datamodule.test_dataloader())
     
     y_true, y_pred, y_scores = [], [], []
+    
     for batch in predictions:
-        y_true.extend(batch.gt_label.cpu().numpy())
-        y_pred.extend(batch.pred_label.cpu().numpy())
-        y_scores.extend(batch.pred_score.cpu().numpy())
+        if isinstance(batch, dict):
+            gt = batch.get("gt_label", batch.get("label", []))
+            pred = batch.get("pred_label", [])
+            score = batch.get("pred_score", [])
+        else:
+            gt = getattr(batch, "gt_label", getattr(batch, "label", []))
+            pred = getattr(batch, "pred_label", [])
+            score = getattr(batch, "pred_score", [])
+            
+        if len(gt) > 0: y_true.extend(gt.cpu().numpy())
+        if len(pred) > 0: y_pred.extend(pred.cpu().numpy())
+        if len(score) > 0: y_scores.extend(score.cpu().numpy())
 
-    # Delegate Reporting and Plotting
-    save_evaluation_report(y_true, y_pred, model_name, backbone, config)
-    plot_auroc_curve(y_true, y_scores, model_name, backbone, layers_str, config)
+    if len(y_true) > 0:
+        save_evaluation_report(y_true, y_pred, model_name, backbone, config)
+        plot_auroc_curve(y_true, y_scores, model_name, backbone, layers_str, config)
+    else:
+        print("[WARNING] Ground truth labels were not found in predict step. Skipping plots.")
     
     return engine

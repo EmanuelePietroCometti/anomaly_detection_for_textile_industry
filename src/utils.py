@@ -36,63 +36,53 @@ def backup_and_cleanup_latest_run(symlink_path, dest_parent_dir, backbone, layer
     except Exception as e:
         print(f"[ERROR] Process failed: {e}. Original files were NOT deleted.")
 
-def export_model_to_onnx(model, config, ckpt_path=None):
+def export_model_to_onnx(model, config, engine, ckpt_path=None):
     """
     Universal function to export any trained Anomalib model to ONNX format.
-    It dynamically detects the model type to assign the correct input size and nomenclature.
     
     Args:
         model: The initialized and trained Anomalib model object.
         config (dict): The configuration dictionary loaded from config.yaml.
-        ckpt_path (str, optional): Path to a specific checkpoint. If None, it exports the current state of the model.
-        
-    Returns:
-        str: The final path of the exported ONNX model, or None if it fails.
+        engine (Engine): The fitted Anomalib Engine instance.
+        ckpt_path (str, optional): Path to a specific checkpoint.
     """
     export_dir = config.get("paths", {}).get("exports_onnx_path", "results/exports")
     
-    # Dynamically extract model properties
     model_name = model.__class__.__name__
     model_arch = config.get("model_architecture", {})
     backbone = model_arch.get("backbone", "default_backbone")
-    
-    # Determine the correct input size dynamically
-    # Patchcore with EfficientNet relies heavily on the crop_size as the effective input, 
-    # while other models like EfficientAD and RD4AD process the full image_size.
     gen_config = config.get("general_configuration", {})
+    
     if model_name.lower() == "patchcore" and "efficientnet" in backbone:
         input_size = tuple(gen_config.get("crop_size", [224, 224]))
     else:
         input_size = tuple(gen_config.get("image_size", [256, 256]))
 
-    engine = Engine()
-
     print(f"\n--- Starting ONNX export for {model_name} ---")
     print(f"Input dimensions expected by the ONNX graph: {input_size}")
     
     try:
-        # Export the model using Anomalib's internal Engine
+        # Use the already configured engine instead of a new empty one
         export_path = engine.export(
             model=model,
             export_type=ExportType.ONNX,
             export_root=export_dir,
             ckpt_path=ckpt_path,
             input_size=input_size,
-            onnx_kwargs={
-                "dynamo": False, # Disabled dynamo for robust compatibility across deployment environments
-            }
+            onnx_kwargs={"dynamo": False}
         )
         
-        # Rename the exported file for better traceability
         timestamp = config.get("global_timestamp", "latest")
-        directory, original_filename = os.path.split(export_path)
+        
+        # Ensure export_path is treated as a string path before splitting
+        export_path_str = str(export_path)
+        directory, original_filename = os.path.split(export_path_str)
         _, extension = os.path.splitext(original_filename)
         
-        # Safe formatting: {timestamp}_{ModelName}_{backbone}.onnx
         new_filename = f"{timestamp}_{model_name}_{backbone}{extension}"
         new_export_path = os.path.join(directory, new_filename)
         
-        os.rename(export_path, new_export_path)
+        os.rename(export_path_str, new_export_path)
         
         print(f"[SUCCESS] Model successfully exported and saved to: {new_export_path}")
         return new_export_path
