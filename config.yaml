@@ -4,7 +4,7 @@ general_configuration:
   valid_extensions: [".bmp", ".BMP"]
 
 dataset_pipeline:
-  dataset_version: 1.0.0
+  dataset_version: 3.0.0
   split_source: True
   seed: 42
   paths:
@@ -16,6 +16,7 @@ dataset_pipeline:
 
   classes:
     good_categories: ["good"]
+    test_only_good_categories: ["dust"]
     defect_categories: ["nodi", "paglie"]
 
   ratios:

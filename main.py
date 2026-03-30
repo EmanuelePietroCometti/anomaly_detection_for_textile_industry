@@ -1,13 +1,16 @@
-from src.dataset_utils import build_mutually_exclusive_datasets
-from src.anomaly_patchcore import apply_patchcore_model, export_checkpoint_to_onnx
-from src.anomaly_ead import train_efficientad
-import argparse
-from src.config import load_config
-from src.transfer_learning import apply_transfer_learning
-from src.eda import apply_eda_analysis
-from datetime import datetime
 import os
 import glob
+import argparse
+from datetime import datetime
+from src.config import load_config
+from src.dataset_utils import build_mutually_exclusive_datasets
+from src.transfer_learning import apply_transfer_learning
+from src.eda import apply_eda_analysis
+from src.anomaly_pipeline import run_anomaly_pipeline
+from src.anomaly_patchcore import configure_patchcore
+from src.anomaly_ead import configure_efficientad
+from src.anomaly_rd4ad import configure_rd4ad
+from src.utils import export_model_to_onnx
 
 def main():
     config = load_config()
@@ -23,9 +26,9 @@ def main():
     argparser.add_argument(
         "--baseline",
         type=str.lower,
-        choices=["efficientad", "patchcore", "none"],
-        default="none", # CAMBIATO: Messo a 'none' di default così puoi fare solo EDA senza avviare il training per sbaglio
-        help="Select the model to execute: 'efficientad' or 'patchcore'"
+        choices=["efficientad", "patchcore", "rd4ad", "none"],
+        default="none",
+        help="Select the model to execute: 'efficientad', 'patchcore', or 'rd4ad'"
     )
     argparser.add_argument(
         "--run-transfer-learning",
@@ -54,20 +57,19 @@ def main():
         config["global_timestamp"] = args.timestamp
     
     if args.create_dataset:
-        print("Starting dataset creation...")
+        print("\nStarting dataset creation...")
         build_mutually_exclusive_datasets()
 
     if args.exploratory_data_analysis:
-        print("Starting exploratory data analysis...")
+        print("\nStarting exploratory data analysis...")
         apply_eda_analysis()
 
     if args.run_transfer_learning:
-        print("Starting Transfer Learning...")
+        print("\nStarting Transfer Learning...")
         apply_transfer_learning(config)
         print("Transfer Learning completed!")
-
     
-    if args.baseline in ["patchcore", "efficientad"]:
+    if args.baseline in ["patchcore", "efficientad", "rd4ad"]:
         custom_weights_dir = config["transfer_learning"]["save_dir"]
         timestamp = config["global_timestamp"]
 
@@ -78,40 +80,42 @@ def main():
 
         if len(matching_files) == 1:
             custom_weights_path = matching_files[0]
-            print(f"[SUCCESS] Custom weights file found: {custom_weights_path}")
+            print(f"\n[SUCCESS] Custom weights file found: {custom_weights_path}")
         elif len(matching_files) == 0:
             if args.timestamp or args.run_transfer_learning:
-                raise FileNotFoundError(f"[ERROR] No weights file found with timestamp {timestamp} in {custom_weights_dir}")
+                print(f"\n[WARNING] No weights file found with timestamp {timestamp} in {custom_weights_dir}")
             else:
-               
-                print(f"[WARNING] No custom weights found for {timestamp}. Make sure the model supports default weights.")
+                print(f"\n[INFO] No custom weights found for {timestamp}. Make sure the model supports default weights.")
         else:
-            raise ValueError(f"[ERROR] Found {len(matching_files)} files with the same timestamp. Cannot disambiguate.")
+            raise ValueError(f"\n[ERROR] Found {len(matching_files)} files with the same timestamp. Cannot disambiguate.")
 
-        if args.baseline == "patchcore":
-            print("Starting PatchCore training...")
-            backbone_name = config["model_architecture"]["backbone"]
-            layers = config["model_architecture"]["layers"]
+        if args.baseline == "efficientad":
+            print("[INFO] EfficientAD selected. Disabling incompatible custom weights injection (PDN architecture).")
+            custom_weights_path = None
             
-            apply_patchcore_model(
-                backbone=backbone_name,
-                layers=layers,
-                custom_weights_path=custom_weights_path,
-                config=config
-            )
-            print("Patchcore completed")
-            export_checkpoint_to_onnx(
-                ckpt_path=config["paths"]["checkpoint_destination"], 
-                export_dir=config["paths"]["exports_onnx_path"],
-                config=config
-            )
+        elif args.baseline == "rd4ad":
+            use_domain_adapted_weights = False 
+            if not use_domain_adapted_weights:
+                print("[INFO] RD4AD selected. Using robust ImageNet weights. Disabling custom weights injection.")
+                custom_weights_path = None
+
+        print(f"\nConfiguring {args.baseline.upper()}...")
+        if args.baseline == "patchcore":
+            model = configure_patchcore(config, custom_weights_path)
             
         elif args.baseline == "efficientad":
-            print("Starting EfficientAD training...")
-            train_efficientad(
-                custom_weights_path=custom_weights_path
-            )
-            print("EfficientAD completed!")
+            model = configure_efficientad(config, custom_weights_path)
+            
+        elif args.baseline == "rd4ad":
+            model = configure_rd4ad(config, custom_weights_path)
+
+        print(f"\nStarting unified training/evaluation pipeline for {args.baseline.upper()}...")
+        engine = run_anomaly_pipeline(model, config) 
+        print(f"\n[SUCCESS] Entire pipeline for {args.baseline.upper()} completed successfully!")
+
+        print(f"\nStarting ONNX Export for {args.baseline.upper()}...")
+        export_model_to_onnx(model=model, config=config)
+        print("\n[SUCCESS] Execution finished!")
 
 if __name__ == "__main__":
     main()

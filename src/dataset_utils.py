@@ -186,6 +186,7 @@ def build_mutually_exclusive_datasets():
 
     good_cats = conf["classes"]["good_categories"]
     defect_cats = conf["classes"]["defect_categories"]
+    test_only_good_cats = conf["classes"]["test_only_good_categories"]
     tl_ratio = conf["ratios"]["tl_allocation_ratio"]
 
     # Destination directories
@@ -221,6 +222,15 @@ def build_mutually_exclusive_datasets():
     num_tl_val_good = int(len(val_good_pool) * tl_ratio)
     tl_val_good = val_good_pool[:num_tl_val_good]
     ad_test_good = val_good_pool[num_tl_val_good:]
+
+    if test_only_good_cats:
+        train_test_only_pool = extract_images_by_category(src_training, test_only_good_cats, valid_extensions)
+        val_test_only_pool = extract_images_by_category(src_validation, test_only_good_cats, valid_extensions)
+
+        all_test_only_good = train_test_only_pool + val_test_only_pool
+
+        ad_test_good.extend(all_test_only_good)
+        print(f"Added {len(all_test_only_good)} test only good images from categories {test_only_good_cats} directly to AD Test Set.")
 
     # PROCESS DEFECT IMAGES
     train_defect_pool = extract_images_by_category(src_training, defect_cats, valid_extensions)
