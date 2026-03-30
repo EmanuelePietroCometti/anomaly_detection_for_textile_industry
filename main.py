@@ -114,7 +114,7 @@ def main():
         print(f"\n[SUCCESS] Entire pipeline for {args.baseline.upper()} completed successfully!")
 
         print(f"\nStarting ONNX Export for {args.baseline.upper()}...")
-        export_model_to_onnx(model=model, config=config)
+        export_model_to_onnx(model=model, config=config, engine=engine)
         print("\n[SUCCESS] Execution finished!")
 
 if __name__ == "__main__":
