@@ -10,10 +10,12 @@ from src.anomaly_pipeline import run_anomaly_pipeline
 from src.anomaly_patchcore import configure_patchcore
 from src.anomaly_ead import configure_efficientad
 from src.anomaly_rd4ad import configure_rd4ad
-from src.utils import export_model_to_onnx
+from src.utils import export_model_to_onnx, backup_and_cleanup_latest_run
 
 def main():
     config = load_config()
+    paths = config["paths"]
+    model_arch=config["model_architecture"]
     
     argparser = argparse.ArgumentParser(description="Run the Anomaly Detection Pipeline")
     
@@ -112,6 +114,9 @@ def main():
         print(f"\nStarting unified training/evaluation pipeline for {args.baseline.upper()}...")
         engine = run_anomaly_pipeline(model, config) 
         print(f"\n[SUCCESS] Entire pipeline for {args.baseline.upper()} completed successfully!")
+
+        
+        backup_and_cleanup_latest_run(symlink_path=paths["symlink_path"], dest_parent_dir=paths["anomaly_images"], backbone=model_arch["backbone"], layers=model_arch["layers"], config=config)
 
         print(f"\nStarting ONNX Export for {args.baseline.upper()}...")
         export_model_to_onnx(model=model, config=config, engine=engine)
