@@ -8,56 +8,48 @@ import numpy as np
 
 def backup_and_cleanup_latest_run(symlink_path, dest_parent_dir, backbone, layers, config):
     """
-    Resolves a symlink or dynamically finds the latest run directory.
-    Copies its content to a new custom-named folder and safely deletes the original one.
+    Checks for local run directories to backup. Gracefully skips if WandbLogger
+    is handling artifacts remotely and local default paths are absent.
     """
-    dataset_cfg = config["dataset_pipeline"]
-    dataset_version = dataset_cfg["dataset_version"]
+    dataset_cfg = config.get("dataset_pipeline", {})
+    dataset_version = dataset_cfg.get("dataset_version", "unknown")
 
     real_source_dir = None
     symlink_path_obj = Path(symlink_path)
 
     if os.path.islink(symlink_path):
         real_source_dir = symlink_path_obj.resolve()
-        print(f"Symlink resolved. Actual source directory: {real_source_dir}")
-
     elif symlink_path_obj.is_dir():
         real_source_dir = symlink_path_obj
-        print(f"Path is a valid directory: {real_source_dir}")
-
     else:
         parent_dir = symlink_path_obj.parent
-        print(f"[WARNING] '{symlink_path}' not found. Searching for the latest run in '{parent_dir}'...")
-        if parent_dir.exists() and parent_dir.is_dir():
-            subdirs = [d for d in parent_dir.iterdir() if d.is_dir() and d.name != "latest"]
-            if subdirs:
-                real_source_dir = max(subdirs, key=os.path.getmtime)
-                print(f"Found latest run directory: {real_source_dir}")
+        # If the directory doesn't exist, it means WandbLogger bypassed local saving
+        if not parent_dir.exists() or not any(parent_dir.iterdir()):
+            print(f"[INFO] No local run directory found in '{parent_dir}'. "
+                  f"This is expected when using WandbLogger.")
+            return
+
+        subdirs = [d for d in parent_dir.iterdir() if d.is_dir() and d.name != "latest"]
+        if subdirs:
+            real_source_dir = max(subdirs, key=os.path.getmtime)
 
     if real_source_dir is None or not real_source_dir.exists():
-        print(f"[ERROR] Could not find a valid run directory for backup.")
+        print(f"[INFO] Skipping backup: valid source directory not found.")
         return
 
-    timestamp = config["global_timestamp"]
+    timestamp = config.get("global_timestamp", "000000")
     layers_str = "_".join(layers) if isinstance(layers, list) else str(layers)
     new_folder_name = f"{timestamp}_{backbone}_{layers_str}_d{dataset_version}"
     destination_dir = Path(dest_parent_dir) / new_folder_name
 
     try:
-        print(f"Copying files to: {destination_dir}")
         shutil.copytree(real_source_dir, destination_dir, dirs_exist_ok=True)
-
-        print(f"Deleting original directory: {real_source_dir}")
         shutil.rmtree(real_source_dir)
-
         if os.path.islink(symlink_path):
             os.unlink(symlink_path)
-            print(f"Removing symlink: {symlink_path}")
-
-        print("[SUCCESS] Cleanup completed. Only the customized backup remains.")
-
+        print("[SUCCESS] Local run logs backed up and cleaned successfully.")
     except Exception as e:
-        print(f"[ERROR] Process failed: {e}. Original files were NOT deleted.")
+        print(f"[ERROR] Backup process failed: {e}.")
 
 def export_model_to_onnx(model, config, engine, ckpt_path=None):
     """
@@ -144,10 +136,12 @@ def save_prediction_triplet(img_path: str, score: float, anomaly_map, pred_mask,
     """
     Reads the original image, processes anomaly maps and masks,
     concatenates them into a triplet, overlays the score, and saves it.
-    Dynamically creates routing directories based on the provided configurations.
     """
     model_arch = config.get("model_architecture", {})
-    anomaly_images_dir = config.get("anomaly_images_dir", config.get("anomlay_images_dir", "results"))
+    # Correctly extract the anomaly_images path from the config dictionary
+    paths_cfg = config.get("paths", {})
+    anomaly_images_dir = paths_cfg.get("anomaly_images", "results/anomaly_images")
+
     dataset_version = config.get("dataset_pipeline", {}).get("dataset_version", "unknown")
     timestamp = config.get("global_timestamp", "000000")
     layers = model_arch.get("layers", ["custom"])
@@ -166,10 +160,7 @@ def save_prediction_triplet(img_path: str, score: float, anomaly_map, pred_mask,
     normal_folder_name = Path(datamodule_cfg.get("test_dir_good", "test/good")).name
     img_path_obj = Path(img_path)
 
-    if normal_folder_name in img_path_obj.parts:
-        target_dir = good_dir
-    else:
-        target_dir = reject_dir
+    target_dir = good_dir if normal_folder_name in img_path_obj.parts else reject_dir
 
     img_orig = cv2.imread(str(img_path))
     if img_orig is None:
@@ -178,25 +169,19 @@ def save_prediction_triplet(img_path: str, score: float, anomaly_map, pred_mask,
 
     h, w = img_orig.shape[:2]
 
-
     if anomaly_map is not None:
         if hasattr(anomaly_map, 'cpu'):
             anomaly_map = anomaly_map.cpu().numpy()
-
         a_map = anomaly_map.squeeze()
-
         a_map_norm = cv2.normalize(a_map, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         heatmap = cv2.applyColorMap(a_map_norm, cv2.COLORMAP_JET)
         heatmap = cv2.resize(heatmap, (w, h))
     else:
-
         heatmap = np.zeros_like(img_orig)
-
 
     if pred_mask is not None:
         if hasattr(pred_mask, 'cpu'):
             pred_mask = pred_mask.cpu().numpy()
-
         p_mask = pred_mask.squeeze()
         p_mask_colored = (p_mask * 255).astype(np.uint8)
         p_mask_colored = cv2.cvtColor(p_mask_colored, cv2.COLOR_GRAY2BGR)
@@ -208,14 +193,8 @@ def save_prediction_triplet(img_path: str, score: float, anomaly_map, pred_mask,
 
     text = f"Anomaly Score: {score:.4f}"
     cv2.putText(
-        img=triplet_img,
-        text=text,
-        org=(20, 40),
-        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-        fontScale=1,
-        color=(0, 0, 255),
-        thickness=2,
-        lineType=cv2.LINE_AA
+        img=triplet_img, text=text, org=(20, 40), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+        fontScale=1, color=(0, 0, 255), thickness=2, lineType=cv2.LINE_AA
     )
 
     save_path = target_dir / f"{img_path_obj.stem}_triplet.jpg"
