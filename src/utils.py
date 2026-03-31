@@ -90,3 +90,33 @@ def export_model_to_onnx(model, config, engine, ckpt_path=None):
     except Exception as e:
         print(f"[ERROR] ONNX Export failed: {e}")
         return None
+    
+
+def save_config_file(config, model):
+    """
+    Helper function that create a copy of the original file configuration as backup in order to ensure test reproducibility 
+    """
+    try:
+        model_architecture = config["model_architecture"]
+        timestamp = config["gobal_timestamp"]
+        backbone = model_architecture["backbone"]
+        layers = model_architecture["layers"]
+        layers_str = "_".join(layers) if isinstance(layers, list) else str(layers)
+        config_src_path = Path(config["paths"]["config_src_path"])
+        config_dst_dir = Path(config["paths"]["config_dst_path"]) 
+        
+        config_dst_dir.mkdir(parents=True, exist_ok=True)
+
+        file_name = f"{timestamp}_{model}_config_{backbone}_{layers_str}.yaml"
+        config_dst_path = config_dst_dir / file_name
+
+
+        print("Saving configruation file...")
+        shutil.copy2(config_src_path, config_dst_path)
+        print(f"File saved on {config_dst_path}")
+    except FileNotFoundError:
+        print(f"Error: source configuration file not found at {config_src_path}")
+    except Exception as e:
+        print(f"Unexpected error occurred: {e}")
+    except KeyError as e:
+        print(f"Error: Missing key in configuration dictionary: {e}")

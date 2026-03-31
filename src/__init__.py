@@ -6,4 +6,4 @@ from eda import apply_eda_analysis
 from transfer_learning import apply_transfer_learning
 from anomaly_rd4ad import configure_rd4ad
 from anomaly_pipeline import run_anomaly_pipeline
-from utils import backup_and_cleanup_latest_run, export_model_to_onnx
+from utils import backup_and_cleanup_latest_run, export_model_to_onnx, save_config_file

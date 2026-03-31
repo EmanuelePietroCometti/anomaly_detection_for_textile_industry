@@ -86,3 +86,5 @@ paths:
   benchmark_pareto_front_efficientad: "results/benchmark/benchmark_pareto_front_efficientad.csv"
   checkpoint_destination: "checkpoints/patchcore-tested.ckpt"
   exports_onnx_path: "exports/patchcore_onnx"
+  config_src_path: "config.yaml"
+  config_dst_path: "results/Patchcore/config"

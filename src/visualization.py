@@ -35,8 +35,10 @@ def save_evaluation_report(y_true, y_pred, model_name, backbone, config):
     # File saving logic
     paths = config.get("paths", {})
     timestamp = config.get("global_timestamp", "latest")
+    layers = config["model_architecture"]
+    layers_str = "_".join(layers) if isinstance(layers, list) else str(layers)
     
-    report_filename = f"{timestamp}_evaluation_{model_name}_{backbone}.txt"
+    report_filename = f"{timestamp}_evaluation_report_{backbone}_{layers_str}.txt"
     report_dir = paths.get("report_path", f"results/{model_name}/report")
     os.makedirs(report_dir, exist_ok=True)
     report_filepath = os.path.join(report_dir, report_filename)

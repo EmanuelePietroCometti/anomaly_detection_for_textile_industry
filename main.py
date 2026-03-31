@@ -10,7 +10,7 @@ from src.anomaly_pipeline import run_anomaly_pipeline
 from src.anomaly_patchcore import configure_patchcore
 from src.anomaly_ead import configure_efficientad
 from src.anomaly_rd4ad import configure_rd4ad
-from src.utils import export_model_to_onnx, backup_and_cleanup_latest_run
+from src.utils import export_model_to_onnx, backup_and_cleanup_latest_run, save_config_file
 
 def main():
     config = load_config()
@@ -117,6 +117,7 @@ def main():
 
         
         backup_and_cleanup_latest_run(symlink_path=paths["symlink_path"], dest_parent_dir=paths["anomaly_images"], backbone=model_arch["backbone"], layers=model_arch["layers"], config=config)
+        save_config_file(config=config, model=model)
 
         print(f"\nStarting ONNX Export for {args.baseline.upper()}...")
         export_model_to_onnx(model=model, config=config, engine=engine)
