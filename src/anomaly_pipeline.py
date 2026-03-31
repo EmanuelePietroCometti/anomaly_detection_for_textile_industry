@@ -1,10 +1,10 @@
-# src/anomaly_pipeline.py
-import os
+import torch
 from anomalib.data import Folder
 from anomalib.engine import Engine
 from anomalib.loggers import AnomalibWandbLogger
 from anomalib.callbacks import ModelCheckpoint, TimerCallback
 from src.visualization import save_evaluation_report, plot_auroc_curve
+from src.utils import save_prediction_triplet
 
 def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     """
@@ -13,13 +13,13 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     datamodule_cfg = config.get("datamodule_configuration", {})
     gen_config = config.get("general_configuration", {})
     model_arch = config.get("model_architecture", {})
-    
+
     model_name = model.__class__.__name__
     backbone = model_arch.get("backbone", "custom_model")
     layers = model_arch.get("layers", ["custom_layers"])
-    paths = config["paths"]
+    paths = config.get("paths", {})
     layers_str = "_".join(layers) if isinstance(layers, list) else str(layers)
-    
+
     datamodule = Folder(
         name="textiles_dataset",
         root=datamodule_cfg.get("root", "./data"),
@@ -34,9 +34,9 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
 
     logger = AnomalibWandbLogger(project=project_name, name=model_name)
     checkpoint_callback = ModelCheckpoint(dirpath="checkpoints", filename=f"{model_name}-latest")
-    
+
     max_epochs = config.get(f"{model_name.lower()}_settings", {}).get("num_epochs", 1)
-    
+
     engine = Engine(
         max_epochs=max_epochs,
         logger=logger,
@@ -46,33 +46,77 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
 
     print(f"\n--- Training {model_name} ---")
     engine.fit(model=model, datamodule=datamodule)
-    
+
     print(f"\n--- Evaluating {model_name} ---")
-    test_results = engine.test(model=model, datamodule=datamodule)
+    engine.test(model=model, datamodule=datamodule)
 
     print("\nExtracting predictions for Metrics and AUROC...")
     predictions = engine.predict(model=model, dataloaders=datamodule.test_dataloader())
-    
+
     y_true, y_pred, y_scores = [], [], []
-    
+
     for batch in predictions:
         if isinstance(batch, dict):
             gt = batch.get("gt_label", batch.get("label", []))
             pred = batch.get("pred_label", [])
             score = batch.get("pred_score", [])
+            image_paths = batch.get("image_path", [])
+
+            anomaly_maps = batch.get("anomaly_map", [])
+            pred_masks = batch.get("pred_mask", [])
+
+            if len(score) > 0 and len(image_paths) > 0:
+                for idx, single_score_tensor in enumerate(score):
+                    single_score = single_score_tensor.item()
+                    img_path = image_paths[idx]
+
+                    a_map = anomaly_maps[idx].cpu().numpy() if len(anomaly_maps) > idx else None
+                    p_mask = pred_masks[idx].cpu().numpy() if len(pred_masks) > idx else None
+
+                    save_prediction_triplet(
+                        img_path=img_path,
+                        score=single_score,
+                        anomaly_map=a_map,
+                        pred_mask=p_mask,
+                        config=config,
+                        datamodule_cfg=datamodule_cfg
+                    )
         else:
             gt = getattr(batch, "gt_label", getattr(batch, "label", []))
             pred = getattr(batch, "pred_label", [])
             score = getattr(batch, "pred_score", [])
-            
+
         if len(gt) > 0: y_true.extend(gt.cpu().numpy())
         if len(pred) > 0: y_pred.extend(pred.cpu().numpy())
         if len(score) > 0: y_scores.extend(score.cpu().numpy())
 
     if len(y_true) > 0:
-        save_evaluation_report(y_true, y_pred, model_name, backbone, config)
+        tensor_scores = torch.tensor(y_scores)
+        tensor_labels = torch.tensor(y_true)
+
+        model.image_threshold.update(preds=tensor_scores, target=tensor_labels)
+
+        img_thresh = model.image_threshold.compute().item()
+        px_thresh = img_thresh
+        if hasattr(model, "pixel_threshold"):
+            try:
+                px_thresh = model.pixel_threshold.compute().item()
+            except Exception:
+                pass
+
+        print(f"[DEBUG] Calculated Thresholds -> Image: {img_thresh:.4f}, Pixel: {px_thresh:.4f}")
+
+        save_evaluation_report(
+            y_true=y_true,
+            y_pred=y_pred,
+            model_name=model_name,
+            backbone=backbone,
+            config=config,
+            image_threshold=img_thresh,
+            pixel_threshold=px_thresh
+        )
         plot_auroc_curve(y_true, y_scores, model_name, backbone, layers_str, config)
     else:
         print("[WARNING] Ground truth labels were not found in predict step. Skipping plots.")
-    
+
     return engine

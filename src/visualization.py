@@ -1,14 +1,15 @@
 import os
+import re
 import matplotlib.pyplot as plt
 from pathlib import Path
 from sklearn.metrics import (
-    confusion_matrix, accuracy_score, precision_score, 
+    confusion_matrix, accuracy_score, precision_score,
     recall_score, f1_score, roc_curve, auc
 )
 
-def save_evaluation_report(y_true, y_pred, model_name, backbone, config):
+def save_evaluation_report(y_true, y_pred, model_name, backbone, config, image_threshold, pixel_threshold):
     """
-    Calculates classification metrics (Confusion Matrix, F1, etc.) 
+    Calculates classification metrics (Confusion Matrix, F1, etc.)
     and exports a detailed text report to the disk.
     """
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
@@ -16,7 +17,7 @@ def save_evaluation_report(y_true, y_pred, model_name, backbone, config):
     prec = precision_score(y_true, y_pred, zero_division=0)
     rec = recall_score(y_true, y_pred, zero_division=0)
     f1 = f1_score(y_true, y_pred, zero_division=0)
-    
+
     report_text = (
         f"\n{'='*65}\n DETAILED REPORT: CONFUSION MATRIX\n{'='*65}\n"
         f"                            | Predicted: GOOD     | Predicted: DEFECT \n"
@@ -27,17 +28,22 @@ def save_evaluation_report(y_true, y_pred, model_name, backbone, config):
         f"    Accuracy    : {acc*100:>6.2f}%\n"
         f"    Precision   : {prec*100:>6.2f}% (Valid defects when rejected)\n"
         f"    Recall      : {rec*100:>6.2f}% (True defects found)\n"
-        f"    F1-Score    : {f1:>6.4f}\n"
+        f"    F1-Score    : {f1*100:>6.2f}%\n"
         f"{'='*65}\n"
+        f"Image threshold   : {image_threshold:>6.4f} (Performs image-level classification to detect global defects within the input image.)\n"
+        f"Pixel threshold   : {pixel_threshold:>6.4f} (Performs pixel-level classification to detect local defects within the input image.)\n"
     )
     print(report_text)
 
-    # File saving logic
     paths = config.get("paths", {})
     timestamp = config.get("global_timestamp", "latest")
-    layers = config["model_architecture"]
+
+    model_arch = config.get("model_architecture", {})
+    layers = model_arch.get("layers", ["custom_layers"])
     layers_str = "_".join(layers) if isinstance(layers, list) else str(layers)
-    
+
+    layers_str = re.sub(r'[\\/*?:"<>|{}\']', "", layers_str)
+
     report_filename = f"{timestamp}_evaluation_report_{backbone}_{layers_str}.txt"
     report_dir = paths.get("report_path", f"results/{model_name}/report")
     os.makedirs(report_dir, exist_ok=True)
@@ -45,13 +51,13 @@ def save_evaluation_report(y_true, y_pred, model_name, backbone, config):
 
     with open(report_filepath, "w", encoding="utf-8") as file:
         file.write(report_text)
-        
+
     print(f"[SUCCESS] Report successfully saved to: {report_filepath}")
 
 
 def plot_auroc_curve(y_true, y_scores, model_name, backbone, layers_str, config):
     """
-    Calculates the False Positive/True Positive rates, plots the AUROC curve, 
+    Calculates the False Positive/True Positive rates, plots the AUROC curve,
     and saves the resulting image to the disk.
     """
     print("Generating AUROC Curve...")
@@ -64,10 +70,10 @@ def plot_auroc_curve(y_true, y_scores, model_name, backbone, layers_str, config)
     plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
     plt.xlim([0.0, 1.0])
     plt.ylim([0.0, 1.05])
-    
+
     plt.xlabel('False Positive Rate (FPR)', fontsize=12)
     plt.ylabel('True Positive Rate (TPR)', fontsize=12)
-    
+
     plt.title(
         f'Receiver Operating Characteristic - {model_name}\n'
         f'Architecture Details: {backbone} | {layers_str}\n',
@@ -79,14 +85,16 @@ def plot_auroc_curve(y_true, y_scores, model_name, backbone, layers_str, config)
     # File saving logic
     paths = config.get("paths", {})
     timestamp = config.get("global_timestamp", "latest")
-    
+
+    safe_layers_str = re.sub(r'[\\/*?:"<>|{}\']', "", layers_str)
+
     results_dir = Path(paths.get("auroc_path", f"results/{model_name}/auroc"))
     results_dir.mkdir(parents=True, exist_ok=True)
-    
-    filename = f"{timestamp}_{model_name}_auroc_{backbone}_{layers_str}.png"
+
+    filename = f"{timestamp}_{model_name}_auroc_{backbone}_{safe_layers_str}.png"
     plot_path = results_dir / filename
-    
+
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     print(f"[SUCCESS] AUROC Curve exported successfully to: {plot_path}")
