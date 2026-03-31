@@ -8,17 +8,35 @@ import numpy as np
 
 def backup_and_cleanup_latest_run(symlink_path, dest_parent_dir, backbone, layers, config):
     """
-    Resolves a symlink copies its target directory to a new
-    custom-named folder, and safely deletes both the original target and the symlink.
+    Resolves a symlink or dynamically finds the latest run directory.
+    Copies its content to a new custom-named folder and safely deletes the original one.
     """
     dataset_cfg = config["dataset_pipeline"]
     dataset_version = dataset_cfg["dataset_version"]
-    if not os.path.islink(symlink_path):
-        print(f"[ERROR] '{symlink_path}' is not a valid symbolic link.")
-        return
 
-    real_source_dir = Path(symlink_path)
-    print(f"Symlink resolved. Actual source directory: {real_source_dir}")
+    real_source_dir = None
+    symlink_path_obj = Path(symlink_path)
+
+    if os.path.islink(symlink_path):
+        real_source_dir = symlink_path_obj.resolve()
+        print(f"Symlink resolved. Actual source directory: {real_source_dir}")
+
+    elif symlink_path_obj.is_dir():
+        real_source_dir = symlink_path_obj
+        print(f"Path is a valid directory: {real_source_dir}")
+
+    else:
+        parent_dir = symlink_path_obj.parent
+        print(f"[WARNING] '{symlink_path}' not found. Searching for the latest run in '{parent_dir}'...")
+        if parent_dir.exists() and parent_dir.is_dir():
+            subdirs = [d for d in parent_dir.iterdir() if d.is_dir() and d.name != "latest"]
+            if subdirs:
+                real_source_dir = max(subdirs, key=os.path.getmtime)
+                print(f"Found latest run directory: {real_source_dir}")
+
+    if real_source_dir is None or not real_source_dir.exists():
+        print(f"[ERROR] Could not find a valid run directory for backup.")
+        return
 
     timestamp = config["global_timestamp"]
     layers_str = "_".join(layers) if isinstance(layers, list) else str(layers)
@@ -28,11 +46,14 @@ def backup_and_cleanup_latest_run(symlink_path, dest_parent_dir, backbone, layer
     try:
         print(f"Copying files to: {destination_dir}")
         shutil.copytree(real_source_dir, destination_dir, dirs_exist_ok=True)
-        print("[SUCCESS] Backup completed successfully.")
+
         print(f"Deleting original directory: {real_source_dir}")
         shutil.rmtree(real_source_dir)
-        print(f"Removing symlink: {symlink_path}")
-        os.unlink(symlink_path)
+
+        if os.path.islink(symlink_path):
+            os.unlink(symlink_path)
+            print(f"Removing symlink: {symlink_path}")
+
         print("[SUCCESS] Cleanup completed. Only the customized backup remains.")
 
     except Exception as e:
@@ -64,7 +85,6 @@ def export_model_to_onnx(model, config, engine, ckpt_path=None):
     print(f"Input dimensions expected by the ONNX graph: {input_size}")
 
     try:
-        # Use the already configured engine instead of a new empty one
         export_path = engine.export(
             model=model,
             export_type=ExportType.ONNX,
@@ -76,7 +96,6 @@ def export_model_to_onnx(model, config, engine, ckpt_path=None):
 
         timestamp = config.get("global_timestamp", "latest")
 
-        # Ensure export_path is treated as a string path before splitting
         export_path_str = str(export_path)
         directory, original_filename = os.path.split(export_path_str)
         _, extension = os.path.splitext(original_filename)
@@ -96,32 +115,30 @@ def export_model_to_onnx(model, config, engine, ckpt_path=None):
 
 def save_config_file(config, model):
     """
-    Helper function that create a copy of the original file configuration as backup in order to ensure test reproducibility
+    Creates a copy of the original configuration file as backup to ensure test reproducibility.
     """
     try:
-        model_architecture = config["model_architecture"]
-        timestamp = config["gobal_timestamp"]
-        backbone = model_architecture["backbone"]
-        layers = model_architecture["layers"]
+        model_architecture = config.get("model_architecture", {})
+        timestamp = config.get("global_timestamp", "latest")
+        backbone = model_architecture.get("backbone", "unknown")
+        layers = model_architecture.get("layers", [])
         layers_str = "_".join(layers) if isinstance(layers, list) else str(layers)
+
+        model_name = model.__class__.__name__
+
         config_src_path = Path(config["paths"]["config_src_path"])
         config_dst_dir = Path(config["paths"]["config_dst_path"])
 
         config_dst_dir.mkdir(parents=True, exist_ok=True)
 
-        file_name = f"{timestamp}_{model}_config_{backbone}_{layers_str}.yaml"
+        file_name = f"{timestamp}_{model_name}_config_{backbone}_{layers_str}.yaml"
         config_dst_path = config_dst_dir / file_name
 
+        shutil.copy(config_src_path, config_dst_path)
+        print(f"[SUCCESS] Config successfully copied to: {config_dst_path}")
 
-        print("Saving configruation file...")
-        shutil.copy2(config_src_path, config_dst_path)
-        print(f"File saved on {config_dst_path}")
-    except FileNotFoundError:
-        print(f"Error: source configuration file not found at {config_src_path}")
     except Exception as e:
-        print(f"Unexpected error occurred: {e}")
-    except KeyError as e:
-        print(f"Error: Missing key in configuration dictionary: {e}")
+        print(f"[ERROR] Failed to copy config file: {e}")
 
 def save_prediction_triplet(img_path: str, score: float, anomaly_map, pred_mask, config: dict, datamodule_cfg: dict):
     """
@@ -161,19 +178,26 @@ def save_prediction_triplet(img_path: str, score: float, anomaly_map, pred_mask,
 
     h, w = img_orig.shape[:2]
 
+
     if anomaly_map is not None:
-        # Move to CPU, remove extra dimensions, and convert to numpy
-        a_map = anomaly_map.squeeze().cpu().numpy()
-        # Normalize to 0-255 and apply color map
+        if hasattr(anomaly_map, 'cpu'):
+            anomaly_map = anomaly_map.cpu().numpy()
+
+        a_map = anomaly_map.squeeze()
+
         a_map_norm = cv2.normalize(a_map, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         heatmap = cv2.applyColorMap(a_map_norm, cv2.COLORMAP_JET)
         heatmap = cv2.resize(heatmap, (w, h))
     else:
-        # Fallback if map is missing
+
         heatmap = np.zeros_like(img_orig)
 
+
     if pred_mask is not None:
-        p_mask = pred_mask.squeeze().cpu().numpy()
+        if hasattr(pred_mask, 'cpu'):
+            pred_mask = pred_mask.cpu().numpy()
+
+        p_mask = pred_mask.squeeze()
         p_mask_colored = (p_mask * 255).astype(np.uint8)
         p_mask_colored = cv2.cvtColor(p_mask_colored, cv2.COLOR_GRAY2BGR)
         p_mask_colored = cv2.resize(p_mask_colored, (w, h))
@@ -189,7 +213,7 @@ def save_prediction_triplet(img_path: str, score: float, anomaly_map, pred_mask,
         org=(20, 40),
         fontFace=cv2.FONT_HERSHEY_SIMPLEX,
         fontScale=1,
-        color=(0, 0, 255), # Red text in BGR
+        color=(0, 0, 255),
         thickness=2,
         lineType=cv2.LINE_AA
     )
