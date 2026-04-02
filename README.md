@@ -20,7 +20,7 @@ To run the full pipeline (data loading, model training, testing, and metric extr
 
 ```bash
 # Ensure you have activated your virtual environment (Poetry/Pip)
-python main.py
+python main.py --baseline <model_baseline>
 ```
 ### Command-Line Arguments
 
