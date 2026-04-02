@@ -4,6 +4,10 @@ general_configuration:
   valid_extensions: [".bmp", ".BMP"]
 
 dataset_pipeline:
+  # ---------------------------------------------------------
+  # Dataset Versioning
+  # ALWAYS update this version whenever you recreate the dataset
+  # ---------------------------------------------------------
   dataset_version: 1.0.0
   split_source: True
   seed: 42
@@ -41,12 +45,12 @@ model_architecture:
   weights: "DEFAULT"
 
 transfer_learning:
-  data_dir: "./data/dataset_supcon"     
-  num_epochs: 10                        
-  batch_size: 16                        
-  learning_rate: 0.0001                 
-  temperature: 0.07                     
-  out_dim: 128                          
+  data_dir: "./data/dataset_supcon"
+  num_epochs: 10
+  batch_size: 16
+  learning_rate: 0.0001
+  temperature: 0.07
+  out_dim: 128
   save_dir: "custom_weights"
 
 datamodule_configuration:
@@ -55,18 +59,22 @@ datamodule_configuration:
   test_dir_good: "./data/dataset_patchcore/test/good"
   test_dir_reject: "./data/dataset_patchcore/test/reject"
 
+# ---------------------------------------------------------
+# Model-Specific Configurations
+# ONLY check and modify the section of your target model
+# ---------------------------------------------------------
 patchcore_configuration:
   num_epochs: 1
   train_batch_size: 16
   eval_batch_size: 16
   coreset_sampling_ratio: 0.01
   num_nearest_neighbors: 9
-  
+
 efficientad_settings:
-  num_epochs: 100           
-  train_batch_size: 16       
+  num_epochs: 100
+  train_batch_size: 16
   eval_batch_size: 16
-  model_size: "s"           
+  model_size: "s"
   learning_rate: 0.0001
   weight_decay: 0.00001
   num_workers: 4
@@ -76,6 +84,12 @@ reversedistillation_settings:
   train_batch_size: 32
   eval_batch_size: 32
 
+
+# ---------------------------------------------------------
+# Output Paths
+# ALWAYS check and update these paths when switching models
+# (e.g., change "Patchcore" to "EfficientAD" or "RD4AD")
+# ---------------------------------------------------------
 paths:
   symlink_path: "results/Patchcore/textiles/latest"
   anomaly_images: "results/Patchcore/anomaly_images"
