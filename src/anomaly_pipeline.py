@@ -5,6 +5,7 @@ from anomalib.loggers import AnomalibWandbLogger
 from anomalib.callbacks import ModelCheckpoint, TimerCallback
 from src.visualization import save_evaluation_report, plot_auroc_curve
 from src.utils import save_prediction_triplet
+import numpy as np
 
 def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     """
@@ -95,8 +96,8 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
             y_scores.extend(score.cpu().numpy() if hasattr(score, 'cpu') else score)
 
     if len(y_true) > 0:
-        tensor_scores = torch.tensor(y_scores)
-        tensor_labels = torch.tensor(y_true)
+        tensor_scores = torch.tensor(np.array(y_scores)).squeeze() 
+        tensor_labels = torch.tensor(np.array(y_true)).squeeze()
 
         model.image_threshold.update(preds=tensor_scores, target=tensor_labels)
 

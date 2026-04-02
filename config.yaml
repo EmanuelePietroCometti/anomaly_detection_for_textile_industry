@@ -4,7 +4,7 @@ general_configuration:
   valid_extensions: [".bmp", ".BMP"]
 
 dataset_pipeline:
-  dataset_version: 3.0.0
+  dataset_version: 1.0.0
   split_source: True
   seed: 42
   paths:
@@ -36,8 +36,8 @@ dataset_pipeline:
     textile_force_range: [0.0, 40.0]
 
 model_architecture:
-  backbone: "efficientnet_b4"
-  layers: ["blocks.1", "blocks.2"]
+  backbone: "resnet18"
+  layers: ["layer1", "layer2", "layer3"]
   weights: "DEFAULT"
 
 transfer_learning:
@@ -72,9 +72,9 @@ efficientad_settings:
   num_workers: 4
 
 reversedistillation_settings:
-  num_epochs: 100
-  train_batch_size: 16
-  eval_batch_size: 16
+  num_epochs: 10
+  train_batch_size: 32
+  eval_batch_size: 32
 
 paths:
   symlink_path: "results/Patchcore/textiles/latest"
