@@ -10,7 +10,7 @@ from src.anomaly_pipeline import run_anomaly_pipeline
 from src.anomaly_patchcore import configure_patchcore
 from src.anomaly_ead import configure_efficientad
 from src.anomaly_rd4ad import configure_rd4ad
-from src.utils import export_model_to_onnx, backup_and_cleanup_latest_run, save_config_file
+from src.utils import export_model_to_onnx, rename_run_and_update_symlink, save_config_file
 
 def main():
     config = load_config()
@@ -75,7 +75,7 @@ def main():
         custom_weights_dir = config["transfer_learning"]["save_dir"]
         timestamp = config["global_timestamp"]
 
-        search_pattern = os.path.join(custom_weights_dir, f"{timestamp}_*.pth")
+        search_pattern = os.path.join(custom_weights_dir, f"{timestamp}_{args.baseline}_*.pth")
         matching_files = glob.glob(search_pattern)
 
         custom_weights_path = None
@@ -116,7 +116,7 @@ def main():
         print(f"\n[SUCCESS] Entire pipeline for {args.baseline.upper()} completed successfully!")
 
         
-        backup_and_cleanup_latest_run(symlink_path=paths["symlink_path"], dest_parent_dir=paths["anomaly_images"], backbone=model_arch["backbone"], layers=model_arch["layers"], config=config)
+        rename_run_and_update_symlink(symlink_path=paths["symlink_path"], backbone=model_arch["backbone"], layers=model_arch["layers"], config=config)
         save_config_file(config=config, model=model)
 
         print(f"\nStarting ONNX Export for {args.baseline.upper()}...")

@@ -6,50 +6,46 @@ from anomalib.deploy import ExportType
 import cv2
 import numpy as np
 
-def backup_and_cleanup_latest_run(symlink_path, dest_parent_dir, backbone, layers, config):
+def rename_run_and_update_symlink(symlink_path, backbone, layers, config):
     """
-    Checks for local run directories to backup. Gracefully skips if WandbLogger
-    is handling artifacts remotely and local default paths are absent.
+    Renames the directory pointed by the symlink and updates the symlink 
+    to point to the new folder name, keeping everything in the same location.
     """
     dataset_cfg = config.get("dataset_pipeline", {})
     dataset_version = dataset_cfg.get("dataset_version", "unknown")
-
-    real_source_dir = None
-    symlink_path_obj = Path(symlink_path)
-
-    if os.path.islink(symlink_path):
-        real_source_dir = symlink_path_obj.resolve()
-    elif symlink_path_obj.is_dir():
-        real_source_dir = symlink_path_obj
+    timestamp = config.get("global_timestamp", "000000")
+    
+    symlink_obj = Path(symlink_path)
+    
+    if symlink_obj.is_symlink():
+        real_source_dir = symlink_obj.resolve()
+    elif symlink_obj.is_dir():
+        real_source_dir = symlink_obj
     else:
-        parent_dir = symlink_path_obj.parent
-        # If the directory doesn't exist, it means WandbLogger bypassed local saving
-        if not parent_dir.exists() or not any(parent_dir.iterdir()):
-            print(f"[INFO] No local run directory found in '{parent_dir}'. "
-                  f"This is expected when using WandbLogger.")
-            return
-
-        subdirs = [d for d in parent_dir.iterdir() if d.is_dir() and d.name != "latest"]
-        if subdirs:
-            real_source_dir = max(subdirs, key=os.path.getmtime)
-
-    if real_source_dir is None or not real_source_dir.exists():
-        print(f"[INFO] Skipping backup: valid source directory not found.")
+        print(f"[INFO] No valid run directory or symlink found at '{symlink_path}'.")
         return
 
-    timestamp = config.get("global_timestamp", "000000")
+    if not real_source_dir.exists():
+        print(f"[ERROR] The target directory '{real_source_dir}' does not exist.")
+        return
+
     layers_str = "_".join(layers) if isinstance(layers, list) else str(layers)
-    new_folder_name = f"{timestamp}_{backbone}_{layers_str}_d{dataset_version}"
-    destination_dir = Path(dest_parent_dir) / new_folder_name
+    new_name = f"{timestamp}_{backbone}_{layers_str}_d{dataset_version}"
+    
+    new_dir_path = real_source_dir.parent / new_name
 
     try:
-        shutil.copytree(real_source_dir, destination_dir, dirs_exist_ok=True)
-        shutil.rmtree(real_source_dir)
-        if os.path.islink(symlink_path):
-            os.unlink(symlink_path)
-        print("[SUCCESS] Local run logs backed up and cleaned successfully.")
+        real_source_dir.rename(new_dir_path)
+        print(f"[SUCCESS] Directory renamed to: {new_name}")
+
+        if symlink_obj.is_symlink():
+            symlink_obj.unlink()
+            symlink_obj.symlink_to(new_dir_path.name) 
+            print(f"[INFO] Symlink '{symlink_obj.name}' updated to point to the new folder.")
+        return True
     except Exception as e:
-        print(f"[ERROR] Backup process failed: {e}.")
+        print(f"[ERROR] Rename/Symlink process failed: {e}")
+        return False
 
 def export_model_to_onnx(model, config, engine, ckpt_path=None):
     """
@@ -199,3 +195,7 @@ def save_prediction_triplet(img_path: str, score: float, anomaly_map, pred_mask,
 
     save_path = target_dir / f"{img_path_obj.stem}_triplet.jpg"
     cv2.imwrite(str(save_path), triplet_img)
+
+
+if __name__ == "__main__":
+    rename_run_and_update_symlink()

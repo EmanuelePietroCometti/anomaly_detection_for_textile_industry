@@ -9,12 +9,12 @@ dataset_pipeline:
   # ALWAYS update this version whenever you recreate the dataset
   # ---------------------------------------------------------
   dataset_version: 1.0.0
-  split_source: True
+  split_source: True ## Set to False if you have already splited the dataset source into training and validation
   seed: 42
   paths:
-    source_unsplitted_dataset: "D:/emanuele/Code/dataset_source"
-    source_training: "D:/emanuele/Code/dataset_splitted/training"
-    source_validation: "D:/emanuele/Code/dataset_splitted/validation"
+    source_unsplitted_dataset: "D:/emanuele/Code/dataset/src_dataset"
+    source_training: "D:/emanuele/Code/dataset/dataset_splitted/training"
+    source_validation: "D:/emanuele/Code/dataset/dataset_splitted/validation"
     dest_transfer_learning: "./data/dataset_supcon"
     dest_patchcore: "./data/dataset_patchcore"
 
@@ -25,10 +25,10 @@ dataset_pipeline:
 
   ratios:
     training_ratio: 0.6
-    tl_allocation_ratio: 0.30
-    good_stress_multiplier: 1
+    tl_allocation_ratio: 0.4
+    good_stress_multiplier: 2
     cimossa_undersampling_ratio: 0.40
-    good_limit_patchcore: 500
+    good_limit_patchcore: 300
 
   augmentation_params:
     prob_h_flip: 0.5
@@ -36,22 +36,27 @@ dataset_pipeline:
     prob_rot_180: 0.5
     prob_stress: 0.5
     textile_intensity_range: [0.2, 0.6]
-    textile_waves_range: [0.5, 0.7]
-    textile_force_range: [0.0, 40.0]
+    textile_waves_range: [0.4, 0.7]
+    textile_force_range: [0.0, 20.0]
 
 model_architecture:
-  backbone: "resnet18"
+  # Attention: RD4AD requires ResNet-based architectures (e.g., resnet18, resnet50, wide_resnet50_2) to properly extract hierarchical feature maps.
+  backbone: "resnet18" 
+  
+  # Attention: RD4AD strictly requires exactly 3 consecutive layers (layer1, layer2, layer3). 
+  # This is a hard structural constraint imposed by the multi-scale One-Class Bottleneck Embedding (OCBE) block.
   layers: ["layer1", "layer2", "layer3"]
   weights: "DEFAULT"
 
 transfer_learning:
   data_dir: "./data/dataset_supcon"
-  num_epochs: 10
+  num_epochs: 1
   batch_size: 16
   learning_rate: 0.0001
   temperature: 0.07
   out_dim: 128
   save_dir: "custom_weights"
+  balancing_dataset: False
 
 datamodule_configuration:
   root: "./data"
@@ -71,7 +76,7 @@ patchcore_configuration:
   num_nearest_neighbors: 9
 
 efficientad_settings:
-  num_epochs: 100
+  num_epochs: 30
   train_batch_size: 16
   eval_batch_size: 16
   model_size: "s"
@@ -80,7 +85,7 @@ efficientad_settings:
   num_workers: 4
 
 reversedistillation_settings:
-  num_epochs: 10
+  num_epochs: 1
   train_batch_size: 32
   eval_batch_size: 32
 
@@ -91,14 +96,18 @@ reversedistillation_settings:
 # (e.g., change "Patchcore" to "EfficientAD" or "RD4AD")
 # ---------------------------------------------------------
 paths:
-  symlink_path: "results/Patchcore/textiles/latest"
-  anomaly_images: "results/Patchcore/anomaly_images"
-  report_path: "results/Patchcore/report"
-  auroc_path: "results/Patchcore/AUROC"
+  # The symbolic link (symlink) path for the latest run results.
+  # Choose the path corresponding to the active model architecture:
+  # - For RD4AD: results/ReverseDistillation/textiles_dataset/latest
+  # - For Patchcore: results/Patchcore/textiles_dataset/latest
+  symlink_path: "results/ReverseDistillation/textiles_dataset/latest"
+  anomaly_images: "results/RD4AD/anomaly_images"
+  report_path: "results/RD4AD/report"
+  auroc_path: "results/RD4AD/AUROC"
   eda_path: "results/EDA"
   benchmark_pareto_front_patchcore: "results/benchmark/benchmark_pareto_front_patchcore.csv"
   benchmark_pareto_front_efficientad: "results/benchmark/benchmark_pareto_front_efficientad.csv"
   checkpoint_destination: "checkpoints/patchcore-tested.ckpt"
-  exports_onnx_path: "exports/patchcore_onnx"
+  exports_onnx_path: "exports/rd4ad_onnx"
   config_src_path: "config.yaml"
-  config_dst_path: "results/Patchcore/config"
+  config_dst_path: "results/RD4AD/config"
