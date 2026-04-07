@@ -70,10 +70,11 @@ def apply_dynamic_augmentation(image_path, config):
     params = config["dataset_pipeline"]["augmentation_params"]
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     
+    # Define base geometric transformations
     base_transform = A.Compose([
-        A.HorizontalFlip(p=params["prob_h_flip"]),
-        A.VerticalFlip(p=params["prob_v_flip"]),
-        A.Rotate(limit=[180, 180], border_mode=cv2.BORDER_REFLECT_101, p=params["prob_rot_180"])
+        A.HorizontalFlip(p=params.get("prob_h_flip", 0.5)),
+        A.VerticalFlip(p=params.get("prob_v_flip", 0.5)),
+        A.Rotate(limit=[180, 180], border_mode=cv2.BORDER_REFLECT_101, p=params.get("prob_rot_180", 0.5))
     ])
     
     augmented_base = base_transform(image=image_rgb)["image"]
@@ -83,29 +84,40 @@ def apply_dynamic_augmentation(image_path, config):
     if random.random() < prob_stress:
         height, width = image_aug.shape[:2]
         x_grid, y_grid = np.meshgrid(np.arange(width), np.arange(height))
+        
         num_waves = random.uniform(*params["textile_waves_range"])
         phase = random.uniform(0, np.pi)
         force = random.uniform(*params["textile_force_range"])
+        intensity = random.uniform(*params["textile_intensity_range"])
+        direction = random.choice([-1.0, 1.0])
 
+        # Select the deformation axis randomly
         if random.choice([True, False]):
-            frequency = x_grid / width * np.pi * num_waves + phase
+            # Horizontal distortion (sinusoidal wave along X)
+            frequency = (x_grid / width) * np.pi * num_waves + phase
             x_deformed = x_grid + force * np.sin(frequency)
-            direction = random.choice([-1.0, 1.0])
-            intensity = random.uniform(*params["textile_intensity_range"])
-            inclination = np.cos(frequency) * direction
-            map_light = 1.0 + (intensity * inclination)
-
-            image_distorted = cv2.remap(image_aug, x_deformed.astype(np.float32), y_grid.astype(np.float32),
-                                      interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
-            map_light_distortion = cv2.remap(map_light.astype(np.float32), x_deformed.astype(np.float32), y_grid.astype(np.float32),
-                                           interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
-            light_distorted = image_distorted.astype(np.float32) * map_light_distortion[..., np.newaxis]
-            return np.clip(light_distorted, 0, 255).astype(np.uint8)
+            y_deformed = y_grid
         else:
-            frequency = y_grid / height * np.pi * num_waves + phase
+            # Vertical distortion (sinusoidal wave along Y)
+            frequency = (y_grid / height) * np.pi * num_waves + phase
+            x_deformed = x_grid
             y_deformed = y_grid + force * np.sin(frequency)
-            return cv2.remap(image_aug, x_grid.astype(np.float32), y_deformed.astype(np.float32),
-                            interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
+            
+        # Calculate inclination and lighting map for depth simulation
+        inclination = np.cos(frequency) * direction
+        map_light = 1.0 + (intensity * inclination)
+
+        # Apply pixel remapping for the selected distortion
+        image_distorted = cv2.remap(image_aug, x_deformed.astype(np.float32), y_deformed.astype(np.float32),
+                                    interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
+        
+        # Remap the lighting map to match the distorted geometry
+        map_light_distortion = cv2.remap(map_light.astype(np.float32), x_deformed.astype(np.float32), y_deformed.astype(np.float32),
+                                       interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
+        
+        # Multiply image by light map and clip to valid uint8 range
+        light_distorted = image_distorted.astype(np.float32) * map_light_distortion[..., np.newaxis]
+        return np.clip(light_distorted, 0, 255).astype(np.uint8)
 
     return image_aug
 
