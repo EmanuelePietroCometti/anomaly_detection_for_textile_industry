@@ -75,7 +75,7 @@ def main():
         custom_weights_dir = config["transfer_learning"]["save_dir"]
         timestamp = config["global_timestamp"]
 
-        search_pattern = os.path.join(custom_weights_dir, f"{timestamp}_{args.baseline}_*.pth")
+        search_pattern = os.path.join(custom_weights_dir, f"{timestamp}_*.pth")
         matching_files = glob.glob(search_pattern)
 
         custom_weights_path = None

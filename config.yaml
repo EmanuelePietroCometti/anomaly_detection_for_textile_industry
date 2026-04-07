@@ -9,7 +9,7 @@ dataset_pipeline:
   # ALWAYS update this version whenever you recreate the dataset
   # ---------------------------------------------------------
   dataset_version: 1.0.0
-  split_source: True ## Set to False if you have already splited the dataset source into training and validation
+  split_source: False ## Set to False if you have already splited the dataset source into training and validation
   seed: 42
   paths:
     source_unsplitted_dataset: "D:/emanuele/Code/dataset/src_dataset"
@@ -41,17 +41,17 @@ dataset_pipeline:
 
 model_architecture:
   # Attention: RD4AD requires ResNet-based architectures (e.g., resnet18, resnet50, wide_resnet50_2) to properly extract hierarchical feature maps.
-  backbone: "resnet18" 
+  backbone: "wide_resnet50_2" 
   
   # Attention: RD4AD strictly requires exactly 3 consecutive layers (layer1, layer2, layer3). 
   # This is a hard structural constraint imposed by the multi-scale One-Class Bottleneck Embedding (OCBE) block.
-  layers: ["layer1", "layer2", "layer3"]
+  layers: ["layer2", "layer3"]
   weights: "DEFAULT"
 
 transfer_learning:
   data_dir: "./data/dataset_supcon"
-  num_epochs: 1
-  batch_size: 16
+  num_epochs: 10
+  batch_size: 32
   learning_rate: 0.0001
   temperature: 0.07
   out_dim: 128
@@ -67,12 +67,12 @@ datamodule_configuration:
 # ---------------------------------------------------------
 # Model-Specific Configurations
 # ONLY check and modify the section of your target model
-# ---------------------------------------------------------
+# --------------------------------------------------------- 
 patchcore_configuration:
   num_epochs: 1
-  train_batch_size: 16
-  eval_batch_size: 16
-  coreset_sampling_ratio: 0.01
+  train_batch_size: 32
+  eval_batch_size: 32
+  coreset_sampling_ratio: 0.2
   num_nearest_neighbors: 9
 
 efficientad_settings:
@@ -100,14 +100,14 @@ paths:
   # Choose the path corresponding to the active model architecture:
   # - For RD4AD: results/ReverseDistillation/textiles_dataset/latest
   # - For Patchcore: results/Patchcore/textiles_dataset/latest
-  symlink_path: "results/ReverseDistillation/textiles_dataset/latest"
-  anomaly_images: "results/RD4AD/anomaly_images"
-  report_path: "results/RD4AD/report"
-  auroc_path: "results/RD4AD/AUROC"
+  symlink_path: "results/Patchcore/textiles_dataset/latest"
+  anomaly_images: "results/Patchcore/anomaly_images"
+  report_path: "results/Patchcore/report"
+  auroc_path: "results/Patchcore/AUROC"
   eda_path: "results/EDA"
   benchmark_pareto_front_patchcore: "results/benchmark/benchmark_pareto_front_patchcore.csv"
   benchmark_pareto_front_efficientad: "results/benchmark/benchmark_pareto_front_efficientad.csv"
   checkpoint_destination: "checkpoints/patchcore-tested.ckpt"
-  exports_onnx_path: "exports/rd4ad_onnx"
+  exports_onnx_path: "exports/patchcore_onnx"
   config_src_path: "config.yaml"
-  config_dst_path: "results/RD4AD/config"
+  config_dst_path: "results/Patchcore/config"
