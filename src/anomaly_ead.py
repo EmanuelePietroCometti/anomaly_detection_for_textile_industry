@@ -37,7 +37,7 @@ def configure_efficientad(config):
         lr=learning_rate,
         weight_decay=weight_decay,
         padding=True,
-        pad_maps=True
+        pad_maps=False
     )
 
     # Override default Anomalib thresholds with the custom metric 
