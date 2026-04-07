@@ -1,17 +1,20 @@
-import os
+# src/anomaly_ead.py
 import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from anomalib.models import EfficientAd
 from anomalib.models.image.efficient_ad.lightning_model import EfficientAdModelSize
 from torchvision.transforms.v2 import Compose, Resize, ToImage, ToDtype, Normalize
+from src.metrics import TargetRecallThreshold 
 
-def configure_efficientad(config, custom_weights_path=None):
+def configure_efficientad(config):
     """
     Instantiates and configures the EfficientAD model.
-    Sets up dynamic transforms, custom weights, and learning rate schedulers.
+    Sets up dynamic transforms, learning rate schedulers, and adaptive thresholding metrics.
+    Custom weights injection is intentionally omitted as PDN architecture is incompatible 
+    with standard ResNet transfer learning.
     """
-    ead_cfg = config.get("efficientad_settings", {})
+    ead_cfg = config.get("efficientad_configuration", {})
     gen_config = config.get("general_configuration", {})
     
     num_epochs = ead_cfg.get("num_epochs", 100)
@@ -19,6 +22,7 @@ def configure_efficientad(config, custom_weights_path=None):
     learning_rate = ead_cfg.get("learning_rate", 1e-4)
     weight_decay = ead_cfg.get("weight_decay", 1e-5)
     img_size = gen_config.get("image_size", [256, 256])
+    imagenete_dir = ead_cfg.get("imagenette_dir", "./data/imagenette_for_efficientad")
 
     print(f"Initializing EfficientAD model ({model_size.upper()} size)...")
     if model_size.upper().startswith("S"):
@@ -28,12 +32,19 @@ def configure_efficientad(config, custom_weights_path=None):
     
     # Model Initialization
     model = EfficientAd(
+        imagenet_dir=imagenete_dir,
         model_size=enum_size,
         lr=learning_rate,
         weight_decay=weight_decay,
+        padding=True,
+        pad_maps=True
     )
 
-    # Dynamic Transforms Setup (Attached directly to the model)
+    # Override default Anomalib thresholds with the custom metric 
+    model.image_threshold = TargetRecallThreshold(target_recall=0.99)
+    model.pixel_threshold = TargetRecallThreshold(target_recall=0.99)
+
+    # Dynamic Transforms Setup
     model.transform = Compose([
         Resize(tuple(img_size)),
         ToImage(),
@@ -41,27 +52,7 @@ def configure_efficientad(config, custom_weights_path=None):
         Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    # Custom Weights Injection
-    if custom_weights_path and os.path.exists(custom_weights_path):
-        print(f"Loading custom weights from: {custom_weights_path}")
-        state_dict = torch.load(custom_weights_path, map_location="cpu")
-        
-        anomalib_state_dict = model.state_dict()
-        adapted_state_dict = {}
-        
-        # Dynamic key mapping
-        for custom_key, tensor in state_dict.items():
-            for anomalib_key in anomalib_state_dict.keys():
-                if custom_key in anomalib_key:
-                    adapted_state_dict[anomalib_key] = tensor
-                    break
-                    
-        model.load_state_dict(adapted_state_dict, strict=False)
-        print(f"Custom weights injected. Adapted layers: {len(adapted_state_dict)}/{len(state_dict)}")
-        if len(adapted_state_dict) == 0:
-            print("WARNING: No keys matched. This happens if you pass ResNet weights to a PDN architecture.")
-    else:
-        print("Using default initialized weights.")
+    print("Using default initialized weights (PDN architecture).")
 
     # Custom Optimizer Override
     def custom_configure_optimizers(self):
@@ -70,7 +61,6 @@ def configure_efficientad(config, custom_weights_path=None):
             lr=learning_rate, 
             weight_decay=weight_decay
         )
-        # Cosine Annealing scheduler scales learning rate over epochs
         scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs)
         return {
             "optimizer": optimizer,
@@ -81,7 +71,6 @@ def configure_efficientad(config, custom_weights_path=None):
             }
         }
     
-    # Override standard Lightning optimizer with the custom one
     model.__class__.configure_optimizers = custom_configure_optimizers
 
     return model

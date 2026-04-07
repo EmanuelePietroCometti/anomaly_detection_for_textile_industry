@@ -96,17 +96,17 @@ def main():
             custom_weights_path = None
             
         elif args.baseline == "rd4ad":
-            use_domain_adapted_weights = False 
-            if not use_domain_adapted_weights:
-                print("[INFO] RD4AD selected. Using robust ImageNet weights. Disabling custom weights injection.")
-                custom_weights_path = None
+            if custom_weights_path:
+                print(f"[INFO] RD4AD selected. Enabling custom weights injection from: {custom_weights_path}")
+            else:
+                print("[INFO] RD4AD selected but no custom weights found. Proceeding with robust ImageNet weights.")
 
         print(f"\nConfiguring {args.baseline.upper()}...")
         if args.baseline == "patchcore":
             model = configure_patchcore(config, custom_weights_path)
             
         elif args.baseline == "efficientad":
-            model = configure_efficientad(config, custom_weights_path)
+            model = configure_efficientad(config)
             
         elif args.baseline == "rd4ad":
             model = configure_rd4ad(config, custom_weights_path)

@@ -18,8 +18,12 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     model_name = model.__class__.__name__
     backbone = model_arch.get("backbone", "custom_model")
     layers = model_arch.get("layers", ["custom_layers"])
-    paths = config.get("paths", {})
     layers_str = "_".join(layers) if isinstance(layers, list) else str(layers)
+
+    model_specific_cfg = config.get(f"{model_name.lower()}_configuration", {})
+    
+    train_bs = model_specific_cfg.get("train_batch_size", datamodule_cfg.get("train_batch_size", 32))
+    eval_bs = model_specific_cfg.get("eval_batch_size", datamodule_cfg.get("eval_batch_size", 32))
 
     datamodule = Folder(
         name="textiles_dataset",
@@ -28,15 +32,15 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         abnormal_dir=datamodule_cfg.get("test_dir_reject", "test/reject").replace("./data/", ""),
         normal_test_dir=datamodule_cfg.get("test_dir_good", "test/good").replace("./data/", ""),
         extensions=tuple(gen_config.get("valid_extensions", [".bmp", ".BMP"])),
-        train_batch_size=datamodule_cfg.get("train_batch_size", 32),
-        eval_batch_size=datamodule_cfg.get("eval_batch_size", 32),
+        train_batch_size=train_bs,
+        eval_batch_size=eval_bs,
     )
     datamodule.setup()
 
     logger = AnomalibWandbLogger(project=project_name, name=model_name)
     checkpoint_callback = ModelCheckpoint(dirpath="checkpoints", filename=f"{model_name}-latest")
 
-    max_epochs = config.get(f"{model_name.lower()}_settings", {}).get("num_epochs", 1)
+    max_epochs = config.get(f"{model_name.lower()}_configuration", {}).get("num_epochs", 1)
 
     engine = Engine(
         max_epochs=max_epochs,
