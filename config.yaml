@@ -8,8 +8,8 @@ dataset_pipeline:
   # Dataset Versioning
   # ALWAYS update this version whenever you recreate the dataset
   # ---------------------------------------------------------
-  dataset_version: 1.0.0
-  split_source: False ## Set to False if you have already splited the dataset source into training and validation
+  dataset_version: 3.0.0
+  split_source: True ## Set to False if you have already splited the dataset source into training and validation
   seed: 42
   paths:
     source_unsplitted_dataset: "D:/emanuele/Code/dataset/src_dataset"
@@ -19,8 +19,8 @@ dataset_pipeline:
     dest_patchcore: "./data/dataset_patchcore"
 
   classes:
-    good_categories: ["good"]
-    test_only_good_categories: ["dust"]
+    good_categories: ["good","dust"]
+    test_only_good_categories: []
     defect_categories: ["nodi", "paglie"]
 
   ratios:
@@ -77,7 +77,7 @@ patchcore_configuration:
 
 efficientad_configuration:
   imagenette_dir: "./data/imagenette_for_efficientad"
-  num_epochs: 1
+  num_epochs: 50
   train_batch_size: 1 # Efficient AD require a fixed batch size equal to 1 to correctly handling the knowledge distillation
   eval_batch_size: 32
   model_size: "s"
@@ -86,7 +86,7 @@ efficientad_configuration:
   num_workers: 4
 
 reversedistillation_configuration:
-  num_epochs: 1
+  num_epochs: 50
   train_batch_size: 32
   eval_batch_size: 32
 
@@ -101,14 +101,15 @@ paths:
   # Choose the path corresponding to the active model architecture:
   # - For RD4AD: results/ReverseDistillation/textiles_dataset/latest
   # - For Patchcore: results/Patchcore/textiles_dataset/latest
-  symlink_path: "results/EfficientAD/textiles_dataset/latest"
-  anomaly_images: "results/EfficientAD/anomaly_images"
-  report_path: "results/EfficientAD/report"
-  auroc_path: "results/EfficientAD/AUROC"
+  # - For EfficientAD: results/EfficientAD/textiles_dataset/latest
+  symlink_path: "results/ReverseDistillation/textiles_dataset/latest"
+  anomaly_images: "results/ReverseDistillation/anomaly_images"
+  report_path: "results/ReverseDistillation/report"
+  auroc_path: "results/ReverseDistillation/AUROC"
   eda_path: "results/EDA"
   benchmark_pareto_front_patchcore: "results/benchmark/benchmark_pareto_front_patchcore.csv"
   benchmark_pareto_front_efficientad: "results/benchmark/benchmark_pareto_front_efficientad.csv"
-  checkpoint_destination: "checkpoints/efficientad-tested.ckpt"
-  exports_onnx_path: "exports/efficientad_onnx"
+  checkpoint_destination: "checkpoints/rd4ad-tested.ckpt"
+  exports_onnx_path: "exports/rd4ad_onnx"
   config_src_path: "config.yaml"
-  config_dst_path: "results/EfficientAD/config"
+  config_dst_path: "results/ReverseDistillation/config"
