@@ -3,7 +3,7 @@ import torch
 from anomalib.models import Patchcore
 from torchvision.transforms.v2 import Compose, Resize, ToImage, ToDtype, Normalize, CenterCrop
 from torchvision.transforms import InterpolationMode
-from src.metrics import TargetRecallThreshold
+# from src.metrics import TargetRecallThreshold
 
 
 def configure_patchcore(config, custom_weights_path=None):
@@ -45,9 +45,9 @@ def configure_patchcore(config, custom_weights_path=None):
             Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
-    # Apply Custom Adaptive Thresholds
-    model.image_threshold = TargetRecallThreshold(target_recall=0.99)
-    model.pixel_threshold = TargetRecallThreshold(target_recall=0.99)
+    
+    # model.image_threshold = TargetRecallThreshold(target_recall=0.99)
+    # model.pixel_threshold = TargetRecallThreshold(target_recall=0.99)
 
     # Custom Weights Injection
     if custom_weights_path and os.path.exists(custom_weights_path):

@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms, models
 import os
-from config import load_config
+from .config import load_config
 from torchmetrics.classification import BinaryAUROC
 from torchvision.transforms.v2 import Compose, Resize, ToImage, ToDtype, Normalize, RandomCrop, CenterCrop
 from torchvision.transforms import InterpolationMode

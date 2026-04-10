@@ -5,7 +5,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from anomalib.models import EfficientAd
 from anomalib.models.image.efficient_ad.lightning_model import EfficientAdModelSize
 from torchvision.transforms.v2 import Compose, Resize, ToImage, ToDtype, Normalize
-from src.metrics import TargetRecallThreshold 
+# from src.metrics import TargetRecallThreshold 
 
 def configure_efficientad(config):
     """
@@ -40,9 +40,8 @@ def configure_efficientad(config):
         pad_maps=False
     )
 
-    # Override default Anomalib thresholds with the custom metric 
-    model.image_threshold = TargetRecallThreshold(target_recall=0.99)
-    model.pixel_threshold = TargetRecallThreshold(target_recall=0.99)
+    # model.image_threshold = TargetRecallThreshold(target_recall=0.99)
+    # model.pixel_threshold = TargetRecallThreshold(target_recall=0.99)
 
     # Dynamic Transforms Setup
     model.transform = Compose([

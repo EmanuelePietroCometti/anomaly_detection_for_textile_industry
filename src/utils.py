@@ -99,7 +99,55 @@ def export_model_to_onnx(model, config, engine, ckpt_path=None):
     except Exception as e:
         print(f"[ERROR] ONNX Export failed: {e}")
         return None
+    
+def export_model_to_pt(model, config, engine):
+    """
+    Universal function to export any trained Anomalib model to TORCH format.
 
+    Args:
+        model: The initialized and trained Anomalib model object.
+        config (dict): The configuration dictionary loaded from config.yaml.
+        engine (Engine): The fitted Anomalib Engine instance.
+        ckpt_path (str, optional): Path to a specific checkpoint.
+    """
+    export_dir = config.get("paths", {}).get("exports_pt_path", "results/exports")
+    model_name = model.__class__.__name__
+    model_arch = config.get("model_architecture", {})
+    backbone = model_arch.get("backbone", "default_backbone")
+    gen_config = config.get("general_configuration", {})
+    
+    if model_name.lower() == "patchcore" and "efficientnet" in backbone:
+        input_size = tuple(gen_config.get("crop_size", [224, 224]))
+    else:
+        input_size = tuple(gen_config.get("image_size", [256, 256]))
+
+    print(f"\n--- Starting TORCH export for {model_name} ---")
+    print(f"Input dimensions expected by the TORCH graph: {input_size}")
+
+    try:
+        export_path = engine.export(
+            model=model,
+            export_type=ExportType.TORCH,
+            export_root=export_dir,
+        )
+
+        timestamp = config.get("global_timestamp", "latest")
+
+        export_path_str = str(export_path)
+        directory, original_filename = os.path.split(export_path_str)
+        _, extension = os.path.splitext(original_filename)
+
+        new_filename = f"{timestamp}_{model_name}_{backbone}{extension}"
+        new_export_path = os.path.join(directory, new_filename)
+
+        os.rename(export_path_str, new_export_path)
+
+        print(f"[SUCCESS] Model successfully exported and saved to: {new_export_path}")
+        return new_export_path
+
+    except Exception as e:
+        print(f"[ERROR] TORCH Export failed: {e}")
+        return None
 
 def save_config_file(config, model):
     """

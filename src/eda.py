@@ -10,7 +10,7 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import accuracy_score
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 import seaborn as sns
-from config import load_config
+from .config import load_config
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import ks_2samp
 from scipy.spatial.distance import mahalanobis

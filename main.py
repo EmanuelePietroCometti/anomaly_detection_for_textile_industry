@@ -1,12 +1,15 @@
 import os
 import cv2
+import logging
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
+os.environ["KMP_WARNINGS"] = "0"
 
+logging.getLogger("torch.utils.flop_counter").setLevel(logging.ERROR)
 cv2.setNumThreads(0)
-
 
 import glob
 import argparse
@@ -19,7 +22,7 @@ from src.anomaly_pipeline import run_anomaly_pipeline
 from src.anomaly_patchcore import configure_patchcore
 from src.anomaly_ead import configure_efficientad
 from src.anomaly_rd4ad import configure_rd4ad
-from src.utils import export_model_to_onnx, rename_run_and_update_symlink, save_config_file
+from src.utils import export_model_to_onnx, rename_run_and_update_symlink, save_config_file, export_model_to_pt
 
 def main():
     config = load_config()
@@ -118,7 +121,7 @@ def main():
             model = configure_efficientad(config)
             
         elif args.baseline == "rd4ad":
-            model = configure_rd4ad(config, custom_weights_path)
+            model = configure_rd4ad(config)
 
         print(f"\nStarting unified training/evaluation pipeline for {args.baseline.upper()}...")
         engine = run_anomaly_pipeline(model, config) 
@@ -130,6 +133,11 @@ def main():
 
         print(f"\nStarting ONNX Export for {args.baseline.upper()}...")
         export_model_to_onnx(model=model, config=config, engine=engine)
+        
+
+        print(f"\nStarting PyTorch (.pt) Export for {args.baseline.upper()}...")
+        export_model_to_pt(model=model, config=config, engine=engine)
+
         print("\n[SUCCESS] Execution finished!")
 
 if __name__ == "__main__":

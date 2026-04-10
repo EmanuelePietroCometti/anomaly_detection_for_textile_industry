@@ -6,6 +6,7 @@ from anomalib.callbacks import ModelCheckpoint, TimerCallback
 from src.visualization import save_evaluation_report, plot_auroc_curve
 from src.utils import save_prediction_triplet
 import numpy as np
+from anomalib.metrics.threshold import ManualThreshold
 
 def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     """
@@ -54,6 +55,13 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
 
     print(f"\n--- Training {model_name} ---")
     engine.fit(model=model, datamodule=datamodule)
+
+    if gen_config.get("flag_threshold", False):
+        manual_threshold_value = gen_config.get("manual_threshold", None)
+        if manual_threshold_value is not None:
+            print(f"\n[INFO] Overriding dynamic threshold with manual value: {manual_threshold_value}")
+            model.image_threshold = ManualThreshold(default_value=manual_threshold_value)
+            model.pixel_threshold = ManualThreshold(default_value=manual_threshold_value)
 
     print(f"\n--- Evaluating {model_name} ---")
     engine.test(model=model, datamodule=datamodule)
