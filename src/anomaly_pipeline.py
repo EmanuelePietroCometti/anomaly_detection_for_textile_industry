@@ -34,6 +34,7 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         extensions=tuple(gen_config.get("valid_extensions", [".bmp", ".BMP"])),
         train_batch_size=train_bs,
         eval_batch_size=eval_bs,
+        num_workers=datamodule_cfg.get("num_workers", 4)
     )
     datamodule.setup()
 
@@ -46,7 +47,9 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         max_epochs=max_epochs,
         logger=logger,
         callbacks=[checkpoint_callback, TimerCallback()],
-        accelerator="auto"
+        accelerator="gpu",
+        devices=1,
+        precision="16-mixed"
     )
 
     print(f"\n--- Training {model_name} ---")

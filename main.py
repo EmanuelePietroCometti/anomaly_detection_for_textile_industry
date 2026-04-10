@@ -1,4 +1,13 @@
 import os
+import cv2
+
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+cv2.setNumThreads(0)
+
+
 import glob
 import argparse
 from datetime import datetime
