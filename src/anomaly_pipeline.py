@@ -1,10 +1,12 @@
 import torch
 from anomalib.data import Folder
+from anomalib.metrics import F1AdaptiveThreshold
 from anomalib.engine import Engine
 from anomalib.loggers import AnomalibWandbLogger
 from anomalib.callbacks import ModelCheckpoint, TimerCallback
 from src.visualization import save_evaluation_report, plot_auroc_curve
 from src.utils import save_prediction_triplet
+import types
 import numpy as np
 from anomalib.metrics.threshold import ManualThreshold
 
@@ -114,15 +116,29 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         tensor_scores = torch.tensor(np.array(y_scores)).squeeze() 
         tensor_labels = torch.tensor(np.array(y_true)).squeeze()
 
-        model.image_threshold.update(preds=tensor_scores, target=tensor_labels)
+        if not hasattr(model, "image_threshold") or model.image_threshold is None:
+            print("[WARNING] 'image_threshold' missing in model. Initializing F1AdaptiveThreshold dynamically.")
+            
+            model.image_threshold = F1AdaptiveThreshold(fields=["pred_score", "gt_label"])
+            model.image_threshold = model.image_threshold.to(tensor_scores.device)
 
+        mock_batch = types.SimpleNamespace(
+            pred_score=tensor_scores,
+            gt_label=tensor_labels
+        )
+        
+        model.image_threshold.update(mock_batch)
+        
         img_thresh = model.image_threshold.compute().item()
+  
         px_thresh = img_thresh
-        if hasattr(model, "pixel_threshold"):
+        if hasattr(model, "pixel_threshold") and model.pixel_threshold is not None:
             try:
                 px_thresh = model.pixel_threshold.compute().item()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[WARNING] Skipping pixel_threshold computation: {e}")
+        else:
+            print("[INFO] 'pixel_threshold' not found. Defaulting to image_threshold value.")
 
         print(f"[DEBUG] Calculated Thresholds -> Image: {img_thresh:.4f}, Pixel: {px_thresh:.4f}")
 
@@ -138,5 +154,4 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         plot_auroc_curve(y_true, y_scores, model_name, backbone, layers_str, config)
     else:
         print("[WARNING] Ground truth labels were not found in predict step. Skipping plots.")
-
     return engine

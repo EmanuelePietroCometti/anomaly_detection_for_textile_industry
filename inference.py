@@ -1,8 +1,13 @@
 import os
+import warnings
 import cv2
 import argparse
 from pathlib import Path
+import numpy as np
 from anomalib.deploy import TorchInferencer
+
+os.environ["TRUST_REMOTE_CODE"] = "1"
+warnings.filterwarnings("ignore", message=".*TorchInferencer is a legacy inferencer.*")
 
 def run_inference(model_path: str, input_path: str, output_root: str, device: str = "cpu"):
     """
@@ -33,35 +38,71 @@ def run_inference(model_path: str, input_path: str, output_root: str, device: st
     print(f"[INFO] Processing {len(image_list)} images...")
 
     # Inference Loop
+    # Inference Loop
     for img_path in image_list:
-        # Load image with OpenCV
-        image = cv2.imread(str(img_path))
-        if image is None:
+        # Load image with OpenCV in BGR format (Standard for OpenCV saving)
+        original_bgr = cv2.imread(str(img_path))
+        if original_bgr is None:
             print(f"[WARNING] Skipping {img_path.name}, could not read file.")
             continue
             
-        # Convert BGR to RGB as expected by the model pipeline
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # Convert BGR to RGB for the model prediction
+        image_rgb = cv2.cvtColor(original_bgr, cv2.COLOR_BGR2RGB)
 
-        # Predict
-        # The output contains: pred_score, pred_label, anomaly_map, and pred_mask
-        predictions = inferencer.predict(image=image)
+        # Predict using the loaded TorchInferencer
+        predictions = inferencer.predict(image=image_rgb)
 
-        # Determine status based on the threshold embedded in the .pt file
+        # Determine status and safely extract the score
         status = "REJECT" if predictions.pred_label else "GOOD"
-        score = predictions.pred_score
+        raw_score = predictions.pred_score
+        score = raw_score.item() if hasattr(raw_score, 'item') else float(raw_score)
 
         print(f"Image: {img_path.name} | Status: {status} | Score: {score:.4f}")
 
-        # Save Visualization (Heatmap)
         if predictions.anomaly_map is not None:
-            # Normalize anomaly map for visualization
-            heatmap = cv2.normalize(predictions.anomaly_map, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-            heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
             
-            # Save the result
+            # Prepare the Heatmap Overlay
+            a_map = predictions.anomaly_map
+            a_map = a_map.detach().cpu().numpy().squeeze() if hasattr(a_map, 'cpu') else a_map.squeeze()
+            
+            # Create the colored heatmap
+            heatmap_norm = cv2.normalize(a_map, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+            heatmap_colored = cv2.applyColorMap(heatmap_norm, cv2.COLORMAP_JET)
+            
+            # Ensure dimensions match before overlaying
+            if heatmap_colored.shape[:2] != original_bgr.shape[:2]:
+                heatmap_colored = cv2.resize(heatmap_colored, (original_bgr.shape[1], original_bgr.shape[0]))
+                
+            # Superimpose the heatmap onto the original image (50% transparency)
+            overlay_img = cv2.addWeighted(original_bgr, 0.5, heatmap_colored, 0.5, 0)
+
+            # Prepare the Segmentation Mask (Contours)
+            segmentation_img = original_bgr.copy()
+            
+            if predictions.pred_mask is not None:
+                p_mask = predictions.pred_mask
+                p_mask = p_mask.detach().cpu().numpy().squeeze() if hasattr(p_mask, 'cpu') else p_mask.squeeze()
+                
+                # Convert binary mask to 0-255 uint8 format
+                mask_uint8 = (p_mask * 255).astype(np.uint8) if p_mask.max() <= 1.0 else p_mask.astype(np.uint8)
+                
+                if mask_uint8.shape[:2] != original_bgr.shape[:2]:
+                    mask_uint8 = cv2.resize(mask_uint8, (original_bgr.shape[1], original_bgr.shape[0]), interpolation=cv2.INTER_NEAREST)
+
+                # Extract boundaries of the defect and draw them in red
+                contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                cv2.drawContours(segmentation_img, contours, -1, (0, 0, 255), 2)
+                
+                # Optional: Also draw contours on the heatmap overlay for better clarity
+                cv2.drawContours(overlay_img, contours, -1, (0, 0, 255), 2)
+
+            # Concatenate horizontally to create the Anomalib-style grid 
+            # [Original | Heatmap Overlay | Segmentation Boundaries]
+            combined_result = np.hstack((original_bgr, overlay_img, segmentation_img))
+            
+            # Save the final concatenated image
             save_name = f"{status}_{score:.3f}_{img_path.name}"
-            cv2.imwrite(str(output_path_obj / save_name), heatmap)
+            cv2.imwrite(str(output_path_obj / save_name), combined_result)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Standalone Anomalib Inference Module")
