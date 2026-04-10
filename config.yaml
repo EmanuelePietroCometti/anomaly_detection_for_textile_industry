@@ -2,8 +2,8 @@ general_configuration:
   image_size: [512, 512]
   crop_size: [512, 512] # If the backbone is "efficientnet" the crop_size is setted as the size of the model's input
   valid_extensions: [".bmp", ".BMP"]
-  flag_threshold: True # If this flag is True the manual threshold is selected, otherwise automatic threshold 
-  manual_threshold: 0.6
+  flag_threshold: False # If this flag is True the manual threshold is selected, otherwise automatic threshold 
+  manual_threshold: 0.5
 
 dataset_pipeline:
   # ---------------------------------------------------------
@@ -88,7 +88,7 @@ efficientad_configuration:
   weight_decay: 0.00001
 
 reversedistillation_configuration:
-  num_epochs: 1
+  num_epochs: 50
   train_batch_size: 16
   eval_batch_size: 16
 
