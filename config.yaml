@@ -4,6 +4,7 @@ general_configuration:
   valid_extensions: [".bmp", ".BMP"]
   flag_threshold: False # If this flag is True the manual threshold is selected, otherwise automatic threshold 
   manual_threshold: 0.5
+  precision: 32
 
 dataset_pipeline:
   # ---------------------------------------------------------
@@ -88,7 +89,7 @@ efficientad_configuration:
   weight_decay: 0.00001
 
 reversedistillation_configuration:
-  num_epochs: 50
+  num_epochs: 1
   train_batch_size: 16
   eval_batch_size: 16
 

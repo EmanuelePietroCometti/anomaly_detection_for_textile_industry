@@ -179,10 +179,10 @@ def save_config_file(config, model):
 def save_prediction_triplet(img_path: str, score: float, anomaly_map, pred_mask, config: dict, datamodule_cfg: dict):
     """
     Reads the original image, processes anomaly maps and masks,
-    concatenates them into a triplet, overlays the score, and saves it.
+    concatenates them into a triplet [Original | Heatmap Overlay | Segmentation Boundaries], 
+    overlays the score, and saves it.
     """
     model_arch = config.get("model_architecture", {})
-    # Correctly extract the anomaly_images path from the config dictionary
     paths_cfg = config.get("paths", {})
     anomaly_images_dir = paths_cfg.get("anomaly_images", "results/anomaly_images")
 
@@ -204,6 +204,7 @@ def save_prediction_triplet(img_path: str, score: float, anomaly_map, pred_mask,
     normal_folder_name = Path(datamodule_cfg.get("test_dir_good", "test/good")).name
     img_path_obj = Path(img_path)
 
+    # Route the image to 'good' or 'reject' folder based on its original path
     target_dir = good_dir if normal_folder_name in img_path_obj.parts else reject_dir
 
     img_orig = cv2.imread(str(img_path))
@@ -213,34 +214,44 @@ def save_prediction_triplet(img_path: str, score: float, anomaly_map, pred_mask,
 
     h, w = img_orig.shape[:2]
 
+    # Prepare heatmap overlay
+    overlay_img = img_orig.copy()
     if anomaly_map is not None:
-        if hasattr(anomaly_map, 'cpu'):
-            anomaly_map = anomaly_map.cpu().numpy()
-        a_map = anomaly_map.squeeze()
-        a_map_norm = cv2.normalize(a_map, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        heatmap = cv2.applyColorMap(a_map_norm, cv2.COLORMAP_JET)
-        heatmap = cv2.resize(heatmap, (w, h))
-    else:
-        heatmap = np.zeros_like(img_orig)
+        a_map = anomaly_map.detach().cpu().numpy().squeeze() if hasattr(anomaly_map, 'cpu') else anomaly_map.squeeze()
+        
+        heatmap_norm = cv2.normalize(a_map, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        heatmap_colored = cv2.applyColorMap(heatmap_norm, cv2.COLORMAP_JET)
+        
+        if heatmap_colored.shape[:2] != (h, w):
+            heatmap_colored = cv2.resize(heatmap_colored, (w, h))
+        
+        overlay_img = cv2.addWeighted(img_orig, 0.5, heatmap_colored, 0.5, 0)
 
+    # Prepare segmentation mask
+    segmentation_img = img_orig.copy()
     if pred_mask is not None:
-        if hasattr(pred_mask, 'cpu'):
-            pred_mask = pred_mask.cpu().numpy()
-        p_mask = pred_mask.squeeze()
-        p_mask_colored = (p_mask * 255).astype(np.uint8)
-        p_mask_colored = cv2.cvtColor(p_mask_colored, cv2.COLOR_GRAY2BGR)
-        p_mask_colored = cv2.resize(p_mask_colored, (w, h))
-    else:
-        p_mask_colored = np.zeros_like(img_orig)
+        p_mask = pred_mask.detach().cpu().numpy().squeeze() if hasattr(pred_mask, 'cpu') else pred_mask.squeeze()
+        
+        mask_uint8 = (p_mask * 255).astype(np.uint8) if p_mask.max() <= 1.0 else p_mask.astype(np.uint8)
+        
+        if mask_uint8.shape[:2] != (h, w):
+            mask_uint8 = cv2.resize(mask_uint8, (w, h), interpolation=cv2.INTER_NEAREST)
 
-    triplet_img = cv2.hconcat([img_orig, heatmap, p_mask_colored])
+        # Extract boundaries of the defect and draw them in red
+        contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(segmentation_img, contours, -1, (0, 0, 255), 2)
+        
+        # Draw contours on the heatmap overlay for better clarity
+        cv2.drawContours(overlay_img, contours, -1, (0, 0, 255), 2)
+
+    # Concatenate and add Score
+    triplet_img = np.hstack((img_orig, overlay_img, segmentation_img))
 
     text = f"Anomaly Score: {score:.4f}"
     cv2.putText(
         img=triplet_img, text=text, org=(20, 40), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
         fontScale=1, color=(0, 0, 255), thickness=2, lineType=cv2.LINE_AA
     )
-
     save_path = target_dir / f"{img_path_obj.stem}_triplet.jpg"
     cv2.imwrite(str(save_path), triplet_img)
 

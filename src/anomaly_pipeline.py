@@ -9,6 +9,7 @@ from src.utils import save_prediction_triplet
 import types
 import numpy as np
 from anomalib.metrics.threshold import ManualThreshold
+from anomalib.data.utils.split import ValSplitMode, TestSplitMode
 
 def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     """
@@ -37,7 +38,8 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         extensions=tuple(gen_config.get("valid_extensions", [".bmp", ".BMP"])),
         train_batch_size=train_bs,
         eval_batch_size=eval_bs,
-        num_workers=datamodule_cfg.get("num_workers", 4)
+        num_workers=datamodule_cfg.get("num_workers", 4),
+        val_split_mode=ValSplitMode.SAME_AS_TEST
     )
     datamodule.setup()
 
@@ -52,7 +54,7 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         callbacks=[checkpoint_callback, TimerCallback()],
         accelerator="gpu",
         devices=1,
-        precision="16-mixed"
+        precision=gen_config.get("precision", "16-mixed")
     )
 
     print(f"\n--- Training {model_name} ---")

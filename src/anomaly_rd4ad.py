@@ -2,6 +2,7 @@ import os
 import torch
 from anomalib.models import ReverseDistillation
 from torchvision.transforms.v2 import Compose, Resize, ToImage, ToDtype, Normalize
+from anomalib.models.image.reverse_distillation.anomaly_map import AnomalyMapGenerationMode
 # from src.metrics import TargetRecallThreshold
 
 def configure_rd4ad(config):
@@ -24,7 +25,10 @@ def configure_rd4ad(config):
     model = ReverseDistillation(
         backbone=backbone,
         layers=layers,
+        anomaly_map_mode=AnomalyMapGenerationMode.MULTIPLY
     )
+
+    model.configure_optimizers()
 
     # Dynamic Transforms Setup
     model.transform = Compose([
