@@ -66,7 +66,7 @@ datamodule_configuration:
   train_dir: "./data/dataset_ad/train"
   test_dir_good: "./data/dataset_ad/test/good"
   test_dir_reject: "./data/dataset_ad/test/reject"
-  mask_dir: "./data/dataset_ad/ground_truth/reject" # Set to None if you don't have masks or don't want to use them
+  mask_dir: "./data/dataset_ad/ground_truth" # Set to None if you don't have masks or don't want to use them
   num_workers: 4 # Standard to prevent CPU overhead. Set to 1 for patchcore
 
 # ---------------------------------------------------------
@@ -95,10 +95,10 @@ SuperSimpleNet_configuration:
   eval_batch_size: 16
 
 supersimplenet_configuration:
-  num_epochs: 10              # Add standard training parameters
-  train_batch_size: 8
-  eval_batch_size: 16
-  learning_rate: 0.0001       # You can configure LR here
+  num_epochs: 300            
+  train_batch_size: 4
+  eval_batch_size: 8
+  learning_rate: 0.0001       
   supervised: False
   perlin_threshold: 0.2
 

@@ -89,8 +89,11 @@ def main():
         config["datamodule_configuration"]["abnormal_dir"] = "train/reject"
         config["datamodule_configuration"]["train_batch_size"] = 2
 
-
-        
+        config["datamodule_configuration"]["mask_dir"] = "train/reject"
+    
+    if args.mode == "supervised":
+        print("\n[INFO] Supervised training mode selected. Enabling supervised configuration for applicable models.")
+        config["supersimplenet_configuration"]["supervised"] = True
 
     if args.timestamp is None:
         config['global_timestamp'] = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -110,7 +113,7 @@ def main():
         apply_transfer_learning(config)
         print("Transfer Learning completed!")
     
-    if args.baseline in ["patchcore", "efficientad", "rd4ad"]:
+    if args.baseline in ["patchcore", "efficientad", "rd4ad", "supersimplenet"]:
         custom_weights_dir = config["transfer_learning"]["save_dir"]
         timestamp = config["global_timestamp"]
 

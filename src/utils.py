@@ -5,7 +5,7 @@ from anomalib.engine import Engine
 from anomalib.deploy import ExportType
 import cv2
 import numpy as np
-from config import load_config
+from .config import load_config
 import glob
 
 def rename_run_and_update_symlink(symlink_path, backbone, layers, config):
