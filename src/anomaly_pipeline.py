@@ -28,6 +28,10 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     
     train_bs = model_specific_cfg.get("train_batch_size", datamodule_cfg.get("train_batch_size", 32))
     eval_bs = model_specific_cfg.get("eval_batch_size", datamodule_cfg.get("eval_batch_size", 32))
+    
+    mask_dir = datamodule_cfg.get("mask_dir", None)
+    if mask_dir is not None:
+        mask_dir = mask_dir.replace("./data/", "")
 
     datamodule = Folder(
         name="textiles_dataset",
@@ -35,6 +39,7 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         normal_dir=datamodule_cfg.get("train_dir", "train/good").replace("./data/", ""),
         abnormal_dir=datamodule_cfg.get("test_dir_reject", "test/reject").replace("./data/", ""),
         normal_test_dir=datamodule_cfg.get("test_dir_good", "test/good").replace("./data/", ""),
+        mask_dir=mask_dir,
         extensions=tuple(gen_config.get("valid_extensions", [".bmp", ".BMP"])),
         train_batch_size=train_bs,
         eval_batch_size=eval_bs,

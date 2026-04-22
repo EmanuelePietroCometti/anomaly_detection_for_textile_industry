@@ -22,6 +22,7 @@ from src.anomaly_pipeline import run_anomaly_pipeline
 from src.anomaly_patchcore import configure_patchcore
 from src.anomaly_ead import configure_efficientad
 from src.anomaly_rd4ad import configure_rd4ad
+from src.anomaly_supersimplenet import configure_supersimplenet
 from src.utils import export_model_to_onnx, rename_run_and_update_symlink, save_config_file, export_model_to_pt
 
 def main():
@@ -40,7 +41,7 @@ def main():
     argparser.add_argument(
         "--baseline",
         type=str.lower,
-        choices=["efficientad", "patchcore", "rd4ad", "none"],
+        choices=["efficientad", "patchcore", "rd4ad", "supersimplenet", "none"],
         default="none",
         help="Select the model to execute: 'efficientad', 'patchcore', or 'rd4ad'"
     )
@@ -62,9 +63,35 @@ def main():
         action="store_true",
         help="Whether to apply exploratory data analysis before training"
     )
+    argparser.add_argument(
+        "--mode",
+        type=str.lower,
+        choices=["unsupervised", "supervised"],
+        default="unsupervised",
+        help="Select the training mode for the anomaly detection model: 'unsupervised' or 'supervised'"
+    )
+    argparser.add_argument(
+        "--retrain",
+        default=False,
+        action="store_true",
+        help="Trigger supervised retraining on a small set of misclassified samples (only applicable if --mode is set to 'supervised')"
+    )
 
     args = argparser.parse_args()
     
+    if args.retrain:
+        print("\n[WARNING] Supervised retraining enabled. Make sure to set --mode to 'supervised' and have the necessary labeled data available for retraining.")
+
+        args.mode = "supervised"
+
+        config["datamodule_configuration"]["root"] = "./data/dataset_retraining"
+        config["datamodule_configuration"]["train_dir"] =  "train/good"
+        config["datamodule_configuration"]["abnormal_dir"] = "train/reject"
+        config["datamodule_configuration"]["train_batch_size"] = 2
+
+
+        
+
     if args.timestamp is None:
         config['global_timestamp'] = datetime.now().strftime("%Y%m%d_%H%M%S")
     else:
@@ -112,6 +139,9 @@ def main():
                 print(f"[INFO] RD4AD selected. Enabling custom weights injection from: {custom_weights_path}")
             else:
                 print("[INFO] RD4AD selected but no custom weights found. Proceeding with robust ImageNet weights.")
+        elif args.baseline == "supersimplenet":
+            print("[INFO] SuperSimpleNet selected. Disabling incompatible custom weights injection (ResNet backbone).")
+            custom_weights_path = None
 
         print(f"\nConfiguring {args.baseline.upper()}...")
         if args.baseline == "patchcore":
@@ -122,6 +152,9 @@ def main():
             
         elif args.baseline == "rd4ad":
             model = configure_rd4ad(config)
+
+        elif args.baseline == "supersimplenet":
+            model = configure_supersimplenet(config)
 
         print(f"\nStarting unified training/evaluation pipeline for {args.baseline.upper()}...")
         engine = run_anomaly_pipeline(model, config) 

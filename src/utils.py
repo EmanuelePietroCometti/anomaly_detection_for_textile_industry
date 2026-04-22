@@ -5,6 +5,8 @@ from anomalib.engine import Engine
 from anomalib.deploy import ExportType
 import cv2
 import numpy as np
+from config import load_config
+import glob
 
 def rename_run_and_update_symlink(symlink_path, backbone, layers, config):
     """
@@ -255,6 +257,38 @@ def save_prediction_triplet(img_path: str, score: float, anomaly_map, pred_mask,
     save_path = target_dir / f"{img_path_obj.stem}_triplet.jpg"
     cv2.imwrite(str(save_path), triplet_img)
 
+def convert_masks(input_dir: str, output_dir: str):
+    """
+    Converts low_intenisty mask images from MVTEC DL Tool into visibile binary masks and save them in BMP format.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    config = load_config()
+
+    mask_paths = []
+    valid_extensions = config.get("general_configuration", {}).get("valid_extensions", [])
+
+    for ext in valid_extensions:
+        search_pattern = os.path.join(input_dir, f"*{ext}")
+        mask_paths.extend(glob.glob(search_pattern))
+    
+    if not mask_paths:
+        print(f"[WARNING] No mask files found in '{input_dir}' with specified extensions.")
+        return
+    
+    for path in mask_paths:
+        img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+
+        if img is None:
+            print(f"[WARNING] Could not read mask image: {path}")
+            continue
+
+        visible_mask = np.where(img > 0, 255, 0).astype(np.uint8)
+        filename = os.path.basename(path)
+        filename_no_ext = os.path.splitext(filename)[0]
+        out_path = os.path.join(output_dir, f"{filename_no_ext}.bmp")
+        cv2.imwrite(out_path, visible_mask)
+        print(f"Processed {filename} -> {os.path.basename(out_path)}")
 
 if __name__ == "__main__":
-    rename_run_and_update_symlink()
+    #rename_run_and_update_symlink()
+    convert_masks(input_dir="data/masks_raw", output_dir="data/masks_converted")

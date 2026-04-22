@@ -1,7 +1,7 @@
 general_configuration:
   image_size: [512, 512]
   crop_size: [512, 512] # If the backbone is "efficientnet" the crop_size is setted as the size of the model's input
-  valid_extensions: [".bmp", ".BMP"]
+  valid_extensions: [".bmp", ".BMP", ".png", ".PNG"]
   flag_threshold: False # If this flag is True the manual threshold is selected, otherwise automatic threshold 
   manual_threshold: 0.5
   precision: 32
@@ -66,6 +66,7 @@ datamodule_configuration:
   train_dir: "./data/dataset_ad/train"
   test_dir_good: "./data/dataset_ad/test/good"
   test_dir_reject: "./data/dataset_ad/test/reject"
+  mask_dir: "./data/dataset_ad/ground_truth/reject" # Set to None if you don't have masks or don't want to use them
   num_workers: 4 # Standard to prevent CPU overhead. Set to 1 for patchcore
 
 # ---------------------------------------------------------
@@ -88,10 +89,18 @@ efficientad_configuration:
   learning_rate: 0.0001
   weight_decay: 0.00001
 
-reversedistillation_configuration:
+SuperSimpleNet_configuration:
   num_epochs: 1
   train_batch_size: 16
   eval_batch_size: 16
+
+supersimplenet_configuration:
+  num_epochs: 10              # Add standard training parameters
+  train_batch_size: 8
+  eval_batch_size: 16
+  learning_rate: 0.0001       # You can configure LR here
+  supervised: False
+  perlin_threshold: 0.2
 
 
 # ---------------------------------------------------------
@@ -102,18 +111,18 @@ reversedistillation_configuration:
 paths:
   # The symbolic link (symlink) path for the latest run results.
   # Choose the path corresponding to the active model architecture:
-  # - For RD4AD: results/ReverseDistillation/textiles_dataset/latest
+  # - For RD4AD: results/SuperSimpleNet/textiles_dataset/latest
   # - For Patchcore: results/Patchcore/textiles_dataset/latest
   # - For EfficientAD: results/EfficientAD/textiles_dataset/latest
-  symlink_path: "results/ReverseDistillation/textiles_dataset/latest"
-  anomaly_images: "results/ReverseDistillation/anomaly_images"
-  report_path: "results/ReverseDistillation/report"
-  auroc_path: "results/ReverseDistillation/AUROC"
+  symlink_path: "results/SuperSimpleNet/textiles_dataset/latest"
+  anomaly_images: "results/SuperSimpleNet/anomaly_images"
+  report_path: "results/SuperSimpleNet/report"
+  auroc_path: "results/SuperSimpleNet/AUROC"
   eda_path: "results/EDA"
   benchmark_pareto_front_patchcore: "results/benchmark/benchmark_pareto_front_patchcore.csv"
   benchmark_pareto_front_efficientad: "results/benchmark/benchmark_pareto_front_efficientad.csv"
-  checkpoint_destination: "checkpoints/rd4ad-tested.ckpt"
-  exports_onnx_path: "exports/rd4ad_onnx"
-  exports_pt_path: "exports/rd4ad_pt"
+  checkpoint_destination: "checkpoints/SuperSimpleNet-tested.ckpt"
+  exports_onnx_path: "exports/SuperSimpleNet_onnx"
+  exports_pt_path: "exports/SuperSimpleNet_pt"
   config_src_path: "config.yaml"
-  config_dst_path: "results/ReverseDistillation/config"
+  config_dst_path: "results/SuperSimpleNet/config"
