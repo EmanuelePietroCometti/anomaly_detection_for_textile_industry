@@ -4,7 +4,7 @@ general_configuration:
   valid_extensions: [".bmp", ".BMP", ".png", ".PNG"]
   flag_threshold: False # If this flag is True the manual threshold is selected, otherwise automatic threshold 
   manual_threshold: 0.5
-  precision: "bf16-mixed"
+  precision: 16-mixed
 
 dataset_pipeline:
   # ---------------------------------------------------------
@@ -98,9 +98,9 @@ SuperSimpleNet_configuration:
   eval_batch_size: 16
 
 supersimplenet_configuration:
-  num_epochs: 300            
-  train_batch_size: 8
-  eval_batch_size: 16
+  num_epochs: 10      
+  train_batch_size: 4
+  eval_batch_size: 8
   learning_rate: 0.0001       
   weight_decay: 0.00001
   supervised: False

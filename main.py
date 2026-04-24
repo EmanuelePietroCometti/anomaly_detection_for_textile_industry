@@ -1,8 +1,7 @@
 import os
 import cv2
 import logging
-
-from safetensors import torch
+import torch
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"

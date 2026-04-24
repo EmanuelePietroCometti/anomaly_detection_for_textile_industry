@@ -5,11 +5,11 @@ from anomalib.engine import Engine
 from anomalib.loggers import AnomalibWandbLogger
 from anomalib.callbacks import ModelCheckpoint, TimerCallback
 from src.visualization import save_evaluation_report, plot_auroc_curve
-from src.utils import save_prediction_triplet, apply_augmentation_transforms
+from src.utils import save_prediction_triplet, get_testiles_augmentations
 import types
 import numpy as np
 from anomalib.metrics.threshold import ManualThreshold
-from anomalib.data.utils.split import ValSplitMode, TestSplitMode
+from anomalib.data.utils.split import ValSplitMode
 
 def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     """
@@ -35,8 +35,8 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     if mask_dir is not None:
         mask_dir = mask_dir.replace("./data/", "")
 
-    transforms = apply_augmentation_transforms(config.get("augmentation_configuration", {}))
-
+    transforms = get_testiles_augmentations(config.get("augmentation_configuration", {}))
+    
     datamodule = Folder(
         name="textiles_dataset",
         root=datamodule_cfg.get("root", "./data"),

@@ -8,6 +8,8 @@ import numpy as np
 from .config import load_config
 import glob
 import albumentations as A
+from PIL import Image
+import torch
 
 def rename_run_and_update_symlink(symlink_path, backbone, layers, config):
     """
@@ -290,13 +292,42 @@ def convert_masks(input_dir: str, output_dir: str):
         cv2.imwrite(out_path, visible_mask)
         print(f"Processed {filename} -> {os.path.basename(out_path)}")
 
-def get_testiles_augmentations(config_aug_params):
-    """
-    Builds the augmentation pipeline for textile anomaly detection.
-    Combines geometric transformations, color adjustments, noise injection, and blurring to create a robust augmentation strategy.
-    """
 
-    transforms = [
+class AlbumentationsWrapper:
+    """
+    Wrapper universale per far comunicare Anomalib e Albumentations.
+    Converte dinamicamente PIL Images, PyTorch Tensors e NumPy Arrays.
+    """
+    def __init__(self, transform):
+        self.transform = transform
+
+    def __call__(self, image):
+        is_pil = isinstance(image, Image.Image)
+        is_tensor = isinstance(image, torch.Tensor)
+        
+        if is_pil:
+            arr = np.array(image)
+        elif is_tensor:
+            arr = image.detach().cpu().numpy()
+            if arr.ndim == 3 and arr.shape[0] in [1, 3]:
+                arr = np.transpose(arr, (1, 2, 0))
+        else:
+            arr = np.asarray(image)
+            
+        augmented = self.transform(image=arr)
+        aug_arr = augmented['image']
+        
+        if is_pil:
+            return Image.fromarray(aug_arr)
+        elif is_tensor:
+            if aug_arr.ndim == 3 and aug_arr.shape[-1] in [1, 3]:
+                aug_arr = np.transpose(aug_arr, (2, 0, 1))
+            return torch.from_numpy(aug_arr).to(image.device).type(image.dtype)
+        
+        return aug_arr
+
+def get_testiles_augmentations(config_aug_params):
+    aug_list = [
         A.HorizontalFlip(p=config_aug_params.get("prob_h_flip", 0.5)),
         A.VerticalFlip(p=config_aug_params.get("prob_v_flip", 0.5)),
         A.RandomRotate90(p=config_aug_params.get("prob_rot_180", 0.5)),
@@ -307,17 +338,16 @@ def get_testiles_augmentations(config_aug_params):
             hue=0.1, 
             p=config_aug_params.get("color_jitter_prob", 0.5)
             ),
-        A.GaussianNoise(
-            var_limit=(10.0, 50.0), 
-            p=config_aug_params.get("gaussian_noise_prob", 0.5)
-            ),
+        A.GaussNoise(std_limit=(0.1, 0.2), p=0.5),
         A.GaussianBlur(
             blur_limit=(3, 7), 
             p=config_aug_params.get("gaussian_blur_prob", 0.5)
             )
     ]
-
-    return transforms
+    
+    compose = A.Compose(aug_list)
+    
+    return AlbumentationsWrapper(compose)
 
 if __name__ == "__main__":
     #rename_run_and_update_symlink()
