@@ -3,7 +3,7 @@ import torch
 import types
 
 def custom_configure_optimizers(self):
-    return torch.optim.AdamW(self.parameters(), lr=self.learning_rate)
+    return torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
 
 def configure_supersimplenet(config):
     """"
@@ -27,10 +27,12 @@ def configure_supersimplenet(config):
     )
 
     custom_lr = supersimplenet_config.get("learning_rate")
+    custom_weight_decay = supersimplenet_config.get("weight_decay")
     custom_num_epochs = supersimplenet_config.get("num_epochs")
     if custom_lr is not None:
         print(f"[INFO] Injecting custom learning rate: {custom_lr} into SuperSimpleNet")
         model.learning_rate = custom_lr
+        model.weight_decay = custom_weight_decay
         model.configure_optimizers = types.MethodType(custom_configure_optimizers, model)
 
     return model

@@ -2,11 +2,15 @@ import os
 import cv2
 import logging
 
+from safetensors import torch
+
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
 os.environ["KMP_WARNINGS"] = "0"
+
+torch.set_float32_matmul_precision("medium")
 
 logging.getLogger("torch.utils.flop_counter").setLevel(logging.ERROR)
 cv2.setNumThreads(0)

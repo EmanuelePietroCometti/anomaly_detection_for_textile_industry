@@ -6,5 +6,5 @@ from .eda import apply_eda_analysis
 from .transfer_learning import apply_transfer_learning
 from .anomaly_rd4ad import configure_rd4ad
 from .anomaly_pipeline import run_anomaly_pipeline
-from .utils import rename_run_and_update_symlink, export_model_to_onnx, save_config_file, export_model_to_pt
+from .utils import rename_run_and_update_symlink, export_model_to_onnx, save_config_file, export_model_to_pt, apply_augmentation_transforms
 from .anomaly_supersimplenet import configure_supersimplenet

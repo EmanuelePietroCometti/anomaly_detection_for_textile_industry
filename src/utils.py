@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 from .config import load_config
 import glob
+import albumentations as A
 
 def rename_run_and_update_symlink(symlink_path, backbone, layers, config):
     """
@@ -288,6 +289,35 @@ def convert_masks(input_dir: str, output_dir: str):
         out_path = os.path.join(output_dir, f"{filename_no_ext}.bmp")
         cv2.imwrite(out_path, visible_mask)
         print(f"Processed {filename} -> {os.path.basename(out_path)}")
+
+def get_testiles_augmentations(config_aug_params):
+    """
+    Builds the augmentation pipeline for textile anomaly detection.
+    Combines geometric transformations, color adjustments, noise injection, and blurring to create a robust augmentation strategy.
+    """
+
+    transforms = [
+        A.HorizontalFlip(p=config_aug_params.get("prob_h_flip", 0.5)),
+        A.VerticalFlip(p=config_aug_params.get("prob_v_flip", 0.5)),
+        A.RandomRotate90(p=config_aug_params.get("prob_rot_180", 0.5)),
+        A.ColorJitter(
+            brightness=0.2, 
+            contrast=0.2, 
+            saturation=0.2, 
+            hue=0.1, 
+            p=config_aug_params.get("color_jitter_prob", 0.5)
+            ),
+        A.GaussianNoise(
+            var_limit=(10.0, 50.0), 
+            p=config_aug_params.get("gaussian_noise_prob", 0.5)
+            ),
+        A.GaussianBlur(
+            blur_limit=(3, 7), 
+            p=config_aug_params.get("gaussian_blur_prob", 0.5)
+            )
+    ]
+
+    return transforms
 
 if __name__ == "__main__":
     #rename_run_and_update_symlink()

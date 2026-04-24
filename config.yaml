@@ -4,7 +4,7 @@ general_configuration:
   valid_extensions: [".bmp", ".BMP", ".png", ".PNG"]
   flag_threshold: False # If this flag is True the manual threshold is selected, otherwise automatic threshold 
   manual_threshold: 0.5
-  precision: 32
+  precision: "bf16-mixed"
 
 dataset_pipeline:
   # ---------------------------------------------------------
@@ -37,6 +37,9 @@ dataset_pipeline:
     prob_h_flip: 0.5
     prob_v_flip: 0.5
     prob_rot_180: 0.5
+    color_jitter_prob: 0.3
+    gaussian_noise_prob: 0.2
+    gaussian_blur_prob: 0.2
     prob_stress: 0.5
     textile_intensity_range: [0.05, 0.15]
     textile_waves_range: [2.0, 5.0]
@@ -96,9 +99,10 @@ SuperSimpleNet_configuration:
 
 supersimplenet_configuration:
   num_epochs: 300            
-  train_batch_size: 4
-  eval_batch_size: 8
+  train_batch_size: 8
+  eval_batch_size: 16
   learning_rate: 0.0001       
+  weight_decay: 0.00001
   supervised: False
   perlin_threshold: 0.2
 

@@ -5,7 +5,7 @@ from anomalib.engine import Engine
 from anomalib.loggers import AnomalibWandbLogger
 from anomalib.callbacks import ModelCheckpoint, TimerCallback
 from src.visualization import save_evaluation_report, plot_auroc_curve
-from src.utils import save_prediction_triplet
+from src.utils import save_prediction_triplet, apply_augmentation_transforms
 import types
 import numpy as np
 from anomalib.metrics.threshold import ManualThreshold
@@ -35,18 +35,21 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     if mask_dir is not None:
         mask_dir = mask_dir.replace("./data/", "")
 
+    transforms = apply_augmentation_transforms(config.get("augmentation_configuration", {}))
+
     datamodule = Folder(
         name="textiles_dataset",
         root=datamodule_cfg.get("root", "./data"),
         normal_dir=datamodule_cfg.get("train_dir", "train/good").replace("./data/", ""),
         abnormal_dir=abnormal_dir_target.replace("./data/", ""),
         normal_test_dir=datamodule_cfg.get("test_dir_good", "test/good").replace("./data/", ""),
-        mask_dir=mask_dir,
+        # mask_dir=mask_dir,
         extensions=tuple(gen_config.get("valid_extensions", [".bmp", ".BMP"])),
         train_batch_size=train_bs,
         eval_batch_size=eval_bs,
         num_workers=datamodule_cfg.get("num_workers", 4),
-        val_split_mode=ValSplitMode.SAME_AS_TEST
+        val_split_mode=ValSplitMode.SAME_AS_TEST,
+        augmentations=transforms
     )
     datamodule.setup()
 
