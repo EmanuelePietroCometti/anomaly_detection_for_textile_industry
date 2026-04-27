@@ -164,6 +164,11 @@ def main():
 
         print(f"\nStarting unified training/evaluation pipeline for {args.baseline.upper()}...")
         engine = run_anomaly_pipeline(model, config) 
+
+        if torch.cuda.is_available():
+            print("[INFO] Peak GPU memory summary post-training.\n")
+            print(torch.cuda.memory_summary(device=None, abbreviated=False))
+            
         print(f"\n[SUCCESS] Entire pipeline for {args.baseline.upper()} completed successfully!")
 
         

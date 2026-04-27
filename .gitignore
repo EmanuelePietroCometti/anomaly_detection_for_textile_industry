@@ -64,3 +64,4 @@ wandb/
 *.sqlite
 *.db
 custom_weights/
+memory_cuda.txt

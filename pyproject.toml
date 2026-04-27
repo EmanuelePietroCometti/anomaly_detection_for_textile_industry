@@ -20,7 +20,8 @@ dependencies = [
     "torch @ https://download.pytorch.org/whl/cu130/torch-2.11.0%2Bcu130-cp312-cp312-win_amd64.whl",
     "torchvision @ https://download.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp312-cp312-win_amd64.whl",
     "albumentations (>=2.0.8,<3.0.0)",
-    "onnx (>=1.21.0,<2.0.0)"
+    "onnx (>=1.21.0,<2.0.0)",
+    "torchinfo (>=1.8.0,<2.0.0)"
 ]
 
 [build-system]
