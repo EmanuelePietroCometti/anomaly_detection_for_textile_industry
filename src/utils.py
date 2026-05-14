@@ -1,6 +1,7 @@
 from pathlib import Path
 import shutil
 import os
+import torch
 from anomalib.engine import Engine
 from anomalib.deploy import ExportType
 import cv2
@@ -10,6 +11,67 @@ import glob
 import albumentations as A
 from PIL import Image
 import torch
+from torchvision.transforms import v2
+from lightning.pytorch.callbacks import Callback
+
+class GPUAugmentationCallback(Callback):
+    """
+    PyTorch Lightning Callback that performs Data Augmentation
+    directly in VRAM using torchvision v2.
+    It intercepts the batch right after it arrives on the GPU but before the forward pass.
+    """
+    def __init__(self):
+        super().__init__()
+        
+        # In Anomalib, tensors on the GPU are normalized between [0.0, 1.0]
+        # Therefore, the white color for padding is 1.0 (not 255)
+        self.gpu_transforms = v2.Compose([
+            # Mechanical Tolerances (Equivalent to Albumentations ShiftScaleRotate)
+            v2.RandomAffine(
+                degrees=[-5.0, 5.0],      # Rotation ±5°
+                translate=[0.04, 0.04],   # Translation ±4%
+                scale=[0.97, 1.03],       # Zoom ±3%
+                fill=1.0,                 # White BORDER_CONSTANT
+                interpolation=v2.InterpolationMode.BILINEAR
+            ),
+            
+            # Photometric Tolerances
+            v2.ColorJitter(
+                brightness=0.05, 
+                contrast=0.05
+            ),
+            
+            # Optical Blur (Applied with a 20% probability)
+            v2.RandomApply([
+                v2.GaussianBlur(kernel_size=3)
+            ], p=0.2)
+        ])
+
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        """
+        This hook triggers ONLY during training (not in validation/test),
+        and exactly AFTER the batch has been copied to the RTX A4000 GPU.
+        """
+        # Safe extraction (supports both dictionaries and Anomalib Dataclasses)
+        images = batch.image if hasattr(batch, 'image') else batch['image']
+        
+        # Apply torchvision v2 transforms to the entire batch in parallel
+        images = self.gpu_transforms(images)
+        
+        # Custom Gaussian Noise (torchvision lacks a native GPU noise transform)
+        # We apply it with a 30% probability
+        if torch.rand(1, device=images.device).item() < 0.3:
+            # Create noise with a standard deviation of 5%
+            noise = torch.randn_like(images) * 0.05
+            images = images + noise
+            # Clamp values to ensure we do not exceed the valid [0.0, 1.0] range
+            images = torch.clamp(images, 0.0, 1.0)
+            
+        # Safe reapplication to the original batch structure
+        if hasattr(batch, 'image'):
+            batch.image = images
+        else:
+            batch['image'] = images
 
 def rename_run_and_update_symlink(symlink_path, backbone, layers, config):
     """
@@ -292,63 +354,6 @@ def convert_masks(input_dir: str, output_dir: str):
         cv2.imwrite(out_path, visible_mask)
         print(f"Processed {filename} -> {os.path.basename(out_path)}")
 
-
-class AlbumentationsWrapper:
-    """
-    Wrapper universale per far comunicare Anomalib e Albumentations.
-    Converte dinamicamente PIL Images, PyTorch Tensors e NumPy Arrays.
-    """
-    def __init__(self, transform):
-        self.transform = transform
-
-    def __call__(self, image):
-        is_pil = isinstance(image, Image.Image)
-        is_tensor = isinstance(image, torch.Tensor)
-        
-        if is_pil:
-            arr = np.array(image)
-        elif is_tensor:
-            arr = image.detach().cpu().numpy()
-            if arr.ndim == 3 and arr.shape[0] in [1, 3]:
-                arr = np.transpose(arr, (1, 2, 0))
-        else:
-            arr = np.asarray(image)
-            
-        augmented = self.transform(image=arr)
-        aug_arr = augmented['image']
-        
-        if is_pil:
-            return Image.fromarray(aug_arr)
-        elif is_tensor:
-            if aug_arr.ndim == 3 and aug_arr.shape[-1] in [1, 3]:
-                aug_arr = np.transpose(aug_arr, (2, 0, 1))
-            return torch.from_numpy(aug_arr).to(image.device).type(image.dtype)
-        
-        return aug_arr
-
-def get_testiles_augmentations(config_aug_params):
-    aug_list = [
-        A.HorizontalFlip(p=config_aug_params.get("prob_h_flip", 0.5)),
-        A.VerticalFlip(p=config_aug_params.get("prob_v_flip", 0.5)),
-        A.RandomRotate90(p=config_aug_params.get("prob_rot_180", 0.5)),
-        A.ColorJitter(
-            brightness=0.2, 
-            contrast=0.2, 
-            saturation=0.2, 
-            hue=0.1, 
-            p=config_aug_params.get("color_jitter_prob", 0.5)
-            ),
-        A.GaussNoise(std_limit=(0.1, 0.2), p=0.5),
-        A.GaussianBlur(
-            blur_limit=(3, 7), 
-            p=config_aug_params.get("gaussian_blur_prob", 0.5)
-            )
-    ]
-    
-    compose = A.Compose(aug_list)
-    
-    return AlbumentationsWrapper(compose)
-
 if __name__ == "__main__":
     #rename_run_and_update_symlink()
-    convert_masks(input_dir="data/masks_raw", output_dir="data/masks_converted")
+    convert_masks(input_dir="D:\\emanuele\\Code\\SuperSimpleNet\\dataset\\active_pool\\masks", output_dir="D:\\emanuele\\Code\\SuperSimpleNet\\dataset\\active_pool\\masks")

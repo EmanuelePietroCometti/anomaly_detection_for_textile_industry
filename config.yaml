@@ -44,6 +44,8 @@ dataset_pipeline:
     textile_intensity_range: [0.05, 0.15]
     textile_waves_range: [2.0, 5.0]
     textile_force_range: [2.0, 8.0]
+    image_height: 512
+    image_width: 512
 
 model_architecture:
   # Attention: RD4AD requires ResNet-based architectures (e.g., resnet18, resnet50, wide_resnet50_2) to properly extract hierarchical feature maps.
@@ -92,10 +94,13 @@ efficientad_configuration:
   learning_rate: 0.0001
   weight_decay: 0.00001
 
-SuperSimpleNet_configuration:
-  num_epochs: 1
-  train_batch_size: 16
-  eval_batch_size: 16
+reversedistillation_configuration:
+  num_epochs: 200
+  train_batch_size: 64
+  eval_batch_size: 64
+  learning_rate: 0.005
+  weight_decay: 0.0001
+  optimizer: "adamw"  # Options: "adamw", "sgd", "adam"
 
 supersimplenet_configuration:
   num_epochs: 10      
@@ -115,18 +120,19 @@ supersimplenet_configuration:
 paths:
   # The symbolic link (symlink) path for the latest run results.
   # Choose the path corresponding to the active model architecture:
-  # - For RD4AD: results/SuperSimpleNet/textiles_dataset/latest
+  # - For RD4AD: results/ReverseDistillation//textiles_dataset/latest
   # - For Patchcore: results/Patchcore/textiles_dataset/latest
   # - For EfficientAD: results/EfficientAD/textiles_dataset/latest
-  symlink_path: "results/SuperSimpleNet/textiles_dataset/latest"
-  anomaly_images: "results/SuperSimpleNet/anomaly_images"
-  report_path: "results/SuperSimpleNet/report"
-  auroc_path: "results/SuperSimpleNet/AUROC"
+  # - For SuperSimpleNet: results/SuperSimpleNet/textiles_dataset/latest
+  symlink_path: "results/ReverseDistillation/textiles_dataset/latest"
+  anomaly_images: "results/ReverseDistillation/anomaly_images"
+  report_path: "results/ReverseDistillation/report"
+  auroc_path: "results/ReverseDistillation/AUROC"
   eda_path: "results/EDA"
   benchmark_pareto_front_patchcore: "results/benchmark/benchmark_pareto_front_patchcore.csv"
   benchmark_pareto_front_efficientad: "results/benchmark/benchmark_pareto_front_efficientad.csv"
-  checkpoint_destination: "checkpoints/SuperSimpleNet-tested.ckpt"
-  exports_onnx_path: "exports/SuperSimpleNet_onnx"
-  exports_pt_path: "exports/SuperSimpleNet_pt"
+  checkpoint_destination: "checkpoints/ReverseDistillation-tested.ckpt"
+  exports_onnx_path: "exports/rd4ad_onnx"
+  exports_pt_path: "exports/rd4ad_pt"
   config_src_path: "config.yaml"
-  config_dst_path: "results/SuperSimpleNet/config"
+  config_dst_path: "results/ReverseDistillation/config"
