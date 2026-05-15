@@ -101,7 +101,7 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         callbacks=[
             checkpoint_callback, 
             TimerCallback(),
-            GPUAugmentationCallback()
+            GPUAugmentationCallback(crop_padding=10)
         ],
         accelerator="gpu",
         devices=1,

@@ -12,66 +12,148 @@ import albumentations as A
 from PIL import Image
 import torch
 from torchvision.transforms import v2
+from torchvision.transforms import functional as F_v2
 from lightning.pytorch.callbacks import Callback
 
 class GPUAugmentationCallback(Callback):
     """
-    PyTorch Lightning Callback that performs Data Augmentation
-    directly in VRAM using torchvision v2.
-    It intercepts the batch right after it arrives on the GPU but before the forward pass.
+    PyTorch Lightning Callback that performs Pure-GPU Dynamic Cropping 
+    and Data Augmentation using torchvision v2.
+    It eliminates CPU bottlenecks by running all spatial logic on CUDA tensors.
     """
-    def __init__(self):
+    def __init__(self, crop_padding=30):
         super().__init__()
+        self.padding = crop_padding
         
-        # In Anomalib, tensors on the GPU are normalized between [0.0, 1.0]
-        # Therefore, the white color for padding is 1.0 (not 255)
-        self.gpu_transforms = v2.Compose([
-            # Mechanical Tolerances (Equivalent to Albumentations ShiftScaleRotate)
+        # Training augmentations (Applied ONLY during training)
+        self.train_transforms = v2.Compose([
             v2.RandomAffine(
-                degrees=[-5.0, 5.0],      # Rotation ±5°
-                translate=[0.04, 0.04],   # Translation ±4%
-                scale=[0.97, 1.03],       # Zoom ±3%
-                fill=1.0,                 # White BORDER_CONSTANT
+                degrees=[-5.0, 5.0],      
+                translate=[0.04, 0.04],   
+                scale=[0.97, 1.03],       
+                fill=1.0,                 # 1.0 is White in normalized tensors
                 interpolation=v2.InterpolationMode.BILINEAR
             ),
-            
-            # Photometric Tolerances
-            v2.ColorJitter(
-                brightness=0.05, 
-                contrast=0.05
-            ),
-            
-            # Optical Blur (Applied with a 20% probability)
-            v2.RandomApply([
-                v2.GaussianBlur(kernel_size=3)
-            ], p=0.2)
+            v2.ColorJitter(brightness=0.05, contrast=0.05),
+            v2.RandomApply([v2.GaussianBlur(kernel_size=3)], p=0.2)
         ])
 
-    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+    def _apply_dynamic_gpu_crop(self, images, masks=None):
         """
-        This hook triggers ONLY during training (not in validation/test),
-        and exactly AFTER the batch has been copied to the RTX A4000 GPU.
+        Translates the OpenCV Dynamic Crop algorithm into pure PyTorch Tensor operations.
+        Executes directly on the GPU in milliseconds.
         """
-        # Safe extraction (supports both dictionaries and Anomalib Dataclasses)
+        B, C, H, W = images.shape
+        device = images.device
+        
+        cropped_imgs = []
+        cropped_masks = [] if masks is not None else None
+        
+        # Grayscale approximation (mean across RGB channels)
+        # Assuming tensors are normalized [0.0, 1.0], background is near 1.0
+        gray = images.mean(dim=1) 
+        
+        # Thresholding: find dark pixels (the mechanical part)
+        is_dark = gray < 0.94 
+        
+        for i in range(B):
+            img = images[i]
+            mask_i = is_dark[i]
+            
+            # Find non-zero coordinates
+            coords = torch.nonzero(mask_i)
+            
+            # Fallback if image is entirely white/empty
+            if coords.numel() == 0:
+                cropped_imgs.append(img)
+                if masks is not None: cropped_masks.append(masks[i])
+                continue
+            
+            # Calculate Bounding Box
+            y_min, x_min = coords.min(dim=0).values
+            y_max, x_max = coords.max(dim=0).values
+            
+            h_box = y_max - y_min
+            w_box = x_max - x_min
+            size = torch.maximum(h_box, w_box) # Make it a perfect square
+            
+            center_y = y_min + h_box // 2
+            center_x = x_min + w_box // 2
+            
+            # Calculate limits with padding, clamped to tensor boundaries
+            y1 = torch.clamp(center_y - size // 2 - self.padding, min=0)
+            y2 = torch.clamp(center_y + size // 2 + self.padding, max=H)
+            x1 = torch.clamp(center_x - size // 2 - self.padding, min=0)
+            x2 = torch.clamp(center_x + size // 2 + self.padding, max=W)
+            
+            # Crop image and keep [1, C, H, W] dimension for resizing
+            crop_img = img[:, y1:y2, x1:x2].unsqueeze(0) 
+            
+            # Resize back to original H, W using torchvision v2
+            resized_img = F_v2.resize(
+                crop_img, size=[H, W], 
+                interpolation=v2.InterpolationMode.BILINEAR, antialias=True
+            )
+            cropped_imgs.append(resized_img.squeeze(0))
+            
+            # If a Ground Truth mask exists, crop it identically to keep pixel-metrics aligned
+            if masks is not None:
+                crop_mask = masks[i:i+1, y1:y2, x1:x2].unsqueeze(0)
+                # Masks must use NEAREST interpolation to remain binary
+                resized_mask = F_v2.resize(
+                    crop_mask, size=[H, W], 
+                    interpolation=v2.InterpolationMode.NEAREST
+                )
+                cropped_masks.append(resized_mask.squeeze(0).squeeze(0))
+
+        res_imgs = torch.stack(cropped_imgs)
+        res_masks = torch.stack(cropped_masks) if masks is not None else None
+        return res_imgs, res_masks
+
+    def _process_batch(self, batch, is_train=False):
+        """Unified method to process batches securely."""
         images = batch.image if hasattr(batch, 'image') else batch['image']
         
-        # Apply torchvision v2 transforms to the entire batch in parallel
-        images = self.gpu_transforms(images)
-        
-        # Custom Gaussian Noise (torchvision lacks a native GPU noise transform)
-        # We apply it with a 30% probability
-        if torch.rand(1, device=images.device).item() < 0.3:
-            # Create noise with a standard deviation of 5%
-            noise = torch.randn_like(images) * 0.05
-            images = images + noise
-            # Clamp values to ensure we do not exceed the valid [0.0, 1.0] range
-            images = torch.clamp(images, 0.0, 1.0)
+        # Check if batch contains ground truth masks (usually in val/test)
+        masks = None
+        has_mask_attr = hasattr(batch, 'mask')
+        if has_mask_attr:
+            masks = batch.mask
+        elif isinstance(batch, dict) and 'mask' in batch:
+            masks = batch['mask']
+
+        # ALWAYS APPLY DYNAMIC CROP (Train, Val, Test)
+        images, masks = self._apply_dynamic_gpu_crop(images, masks)
+
+        # APPLY AUGMENTATION ONLY IN TRAINING
+        if is_train:
+            images = self.train_transforms(images)
             
-        # Safe reapplication to the original batch structure
+            # Custom GPU Noise (30% probability)
+            if torch.rand(1, device=images.device).item() < 0.3:
+                noise = torch.randn_like(images) * 0.05
+                images = torch.clamp(images + noise, 0.0, 1.0)
+
+        # Re-assign back to batch
         if hasattr(batch, 'image'):
             batch.image = images
+            if masks is not None: batch.mask = masks
         else:
             batch['image'] = images
+            if masks is not None: batch['mask'] = masks
+
+    # Pytorch Lightning Hooks
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        self._process_batch(batch, is_train=True)
+
+    def on_val_batch_start(self, trainer, pl_module, batch, batch_idx):
+        self._process_batch(batch, is_train=False)
+
+    def on_test_batch_start(self, trainer, pl_module, batch, batch_idx):
+        self._process_batch(batch, is_train=False)
+
+    def on_predict_batch_start(self, trainer, pl_module, batch, batch_idx):
+        self._process_batch(batch, is_train=False)
 
 def rename_run_and_update_symlink(symlink_path, backbone, layers, config):
     """
