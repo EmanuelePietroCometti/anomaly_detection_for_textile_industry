@@ -17,89 +17,103 @@ from lightning.pytorch.callbacks import Callback
 
 class GPUAugmentationCallback(Callback):
     """
-    PyTorch Lightning Callback that performs Pure-GPU Dynamic Cropping 
-    and Data Augmentation using torchvision v2.
-    It eliminates CPU bottlenecks by running all spatial logic on CUDA tensors.
+    PyTorch Lightning Callback executing pure-GPU advanced augmentations
+    specifically designed to make models robust against dust noise on textile datasets.
     """
-    def __init__(self, crop_padding=30):
+    def __init__(self, crop_padding=30, equalization_p=0.5):
         super().__init__()
         self.padding = crop_padding
+        self.equalization_p = equalization_p
         
-        # Training augmentations (Applied ONLY during training)
+        # Optimized pipeline for textile defect detection ignoring dust
         self.train_transforms = v2.Compose([
+            # Spatial/Geometry: Standard textile rotations and slight scales
             v2.RandomAffine(
-                degrees=[-5.0, 5.0],      
-                translate=[0.04, 0.04],   
-                scale=[0.97, 1.03],       
-                fill=1.0,                 # 1.0 is White in normalized tensors
+                degrees=[-10.0, 10.0],      
+                translate=[0.02, 0.02],   
+                scale=[0.98, 1.02],       
+                fill=1.0, # White background padding
                 interpolation=v2.InterpolationMode.BILINEAR
             ),
-            v2.ColorJitter(brightness=0.05, contrast=0.05),
-            v2.RandomApply([v2.GaussianBlur(kernel_size=3)], p=0.2)
+            # Color Agnosticism: Heavy jittering so the network stops relying
+            # on precise color signatures of dust vs straw
+            v2.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.02),
+            v2.RandomGrayscale(p=0.2),
+            
+            # High-Frequency Mitigation: Blurring forces the network to look at 
+            # macro textile structures (straws) rather than microscopic specs (dust)
+            v2.RandomApply([
+                v2.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0))
+            ], p=0.4)
         ])
 
+    def _apply_gpu_equalization(self, images):
+        """
+        Applies histogram equalization on a per-image basis within the batch.
+        Handles float32 [0.0, 1.0] -> uint8 [0, 255] -> float32 [0.0, 1.0] conversion on GPU.
+        """
+        equalized_images = []
+
+        for i in range(images.shape[0]):
+            img = images[i]
+
+            # Denormalize to uint8 for torchvision functional compatibility
+            img_unint8 = (img * 255.0).clamp(0, 255).to(torch.uint8)
+
+            # Appòly GPU equalization using torchvision's functional API
+            img_eq = F_v2.equalize(img_unint8)
+
+            # Bring back to float32 [0.0, 1.0]
+            img_eq_float = img_eq.to(torch.float32) / 255.0
+            equalized_images.append(img_eq_float)
+
+        return torch.stack(equalized_images)
+    
+
     def _apply_dynamic_gpu_crop(self, images, masks=None):
-        """
-        Translates the OpenCV Dynamic Crop algorithm into pure PyTorch Tensor operations.
-        Executes directly on the GPU in milliseconds.
-        """
+        """Translates OpenCV Dynamic Crop into pure PyTorch Tensor operations."""
         B, C, H, W = images.shape
-        device = images.device
-        
         cropped_imgs = []
         cropped_masks = [] if masks is not None else None
         
-        # Grayscale approximation (mean across RGB channels)
-        # Assuming tensors are normalized [0.0, 1.0], background is near 1.0
+        # Assuming background is close to 1.0 (white normalized)
         gray = images.mean(dim=1) 
-        
-        # Thresholding: find dark pixels (the mechanical part)
         is_dark = gray < 0.94 
         
         for i in range(B):
             img = images[i]
             mask_i = is_dark[i]
-            
-            # Find non-zero coordinates
             coords = torch.nonzero(mask_i)
             
-            # Fallback if image is entirely white/empty
             if coords.numel() == 0:
                 cropped_imgs.append(img)
                 if masks is not None: cropped_masks.append(masks[i])
                 continue
             
-            # Calculate Bounding Box
             y_min, x_min = coords.min(dim=0).values
             y_max, x_max = coords.max(dim=0).values
             
             h_box = y_max - y_min
             w_box = x_max - x_min
-            size = torch.maximum(h_box, w_box) # Make it a perfect square
+            size = torch.maximum(h_box, w_box)
             
             center_y = y_min + h_box // 2
             center_x = x_min + w_box // 2
             
-            # Calculate limits with padding, clamped to tensor boundaries
             y1 = torch.clamp(center_y - size // 2 - self.padding, min=0)
             y2 = torch.clamp(center_y + size // 2 + self.padding, max=H)
             x1 = torch.clamp(center_x - size // 2 - self.padding, min=0)
             x2 = torch.clamp(center_x + size // 2 + self.padding, max=W)
             
-            # Crop image and keep [1, C, H, W] dimension for resizing
             crop_img = img[:, y1:y2, x1:x2].unsqueeze(0) 
-            
-            # Resize back to original H, W using torchvision v2
             resized_img = F_v2.resize(
                 crop_img, size=[H, W], 
                 interpolation=v2.InterpolationMode.BILINEAR, antialias=True
             )
             cropped_imgs.append(resized_img.squeeze(0))
             
-            # If a Ground Truth mask exists, crop it identically to keep pixel-metrics aligned
             if masks is not None:
                 crop_mask = masks[i:i+1, y1:y2, x1:x2].unsqueeze(0)
-                # Masks must use NEAREST interpolation to remain binary
                 resized_mask = F_v2.resize(
                     crop_mask, size=[H, W], 
                     interpolation=v2.InterpolationMode.NEAREST
@@ -111,28 +125,36 @@ class GPUAugmentationCallback(Callback):
         return res_imgs, res_masks
 
     def _process_batch(self, batch, is_train=False):
-        """Unified method to process batches securely."""
+        """Processes batches directly on GPU executing tailored noise injection."""
         images = batch.image if hasattr(batch, 'image') else batch['image']
         
-        # Check if batch contains ground truth masks (usually in val/test)
         masks = None
-        has_mask_attr = hasattr(batch, 'mask')
-        if has_mask_attr:
+        if hasattr(batch, 'mask'):
             masks = batch.mask
         elif isinstance(batch, dict) and 'mask' in batch:
             masks = batch['mask']
 
-        # ALWAYS APPLY DYNAMIC CROP (Train, Val, Test)
+        # Dynamic cropping (always active)
         images, masks = self._apply_dynamic_gpu_crop(images, masks)
 
-        # APPLY AUGMENTATION ONLY IN TRAINING
+        # Augmentations logic
         if is_train:
+            if torch.rand(1, device = images.device).item() < self.equalization_p:
+                images = self._apply_gpu_equalization(images)
+
             images = self.train_transforms(images)
             
-            # Custom GPU Noise (30% probability)
-            if torch.rand(1, device=images.device).item() < 0.3:
-                noise = torch.randn_like(images) * 0.05
-                images = torch.clamp(images + noise, 0.0, 1.0)
+            # Dynamic Dust Simulation (Salt & Pepper Noise)
+            # Injecting artificial dust teaches the model that tiny black/white dots 
+            # do not change the classification target.
+            if torch.rand(1, device=images.device).item() < 0.4:
+                # Generate a random binary mask for dust coordinates
+                dust_mask_black = torch.rand_like(images[:, 0:1, :, :]) < 0.005 # 0.5% black dust
+                dust_mask_white = torch.rand_like(images[:, 0:1, :, :]) < 0.005 # 0.5% white dust
+                
+                # Apply dust directly to all channels
+                images = torch.where(dust_mask_black, torch.zeros_like(images), images)
+                images = torch.where(dust_mask_white, torch.ones_like(images), images)
 
         # Re-assign back to batch
         if hasattr(batch, 'image'):
@@ -142,7 +164,6 @@ class GPUAugmentationCallback(Callback):
             batch['image'] = images
             if masks is not None: batch['mask'] = masks
 
-    # Pytorch Lightning Hooks
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
         self._process_batch(batch, is_train=True)
 
