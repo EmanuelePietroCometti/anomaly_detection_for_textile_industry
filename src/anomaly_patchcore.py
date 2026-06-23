@@ -28,44 +28,4 @@ def configure_patchcore(config, custom_weights_path=None):
         num_neighbors=patchcore_cfg.get("num_nearest_neighbors", 9),
     )
 
-    # Dynamic Transforms Setup
-    if "efficientnet" in backbone:
-        model.transform = Compose([
-            Resize(crop_size, interpolation=InterpolationMode.BICUBIC), 
-            ToImage(),
-            ToDtype(torch.float32, scale=True),
-            Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-    else:
-        model.transform = Compose([
-            Resize(image_size),
-            CenterCrop(crop_size),
-            ToImage(),
-            ToDtype(torch.float32, scale=True),
-            Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-
-    
-    # model.image_threshold = TargetRecallThreshold(target_recall=0.99)
-    # model.pixel_threshold = TargetRecallThreshold(target_recall=0.99)
-
-    # Custom Weights Injection
-    if custom_weights_path and os.path.exists(custom_weights_path):
-        print(f"Loading custom weights from: {custom_weights_path}")
-        state_dict = torch.load(custom_weights_path, map_location="cpu")
-        
-        anomalib_state_dict = model.state_dict()
-        adapted_state_dict = {}
-        
-        for custom_key, tensor in state_dict.items():
-            for anomalib_key in anomalib_state_dict.keys():
-                if custom_key in anomalib_key:
-                    adapted_state_dict[anomalib_key] = tensor
-                    break
-                    
-        model.load_state_dict(adapted_state_dict, strict=False)
-        print(f"Custom weights injected. Adapted layers: {len(adapted_state_dict)}/{len(state_dict)}")
-    else:
-        print("Using default ImageNet weights for backbone.")
-
     return model
