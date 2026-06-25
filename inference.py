@@ -1,121 +1,165 @@
-import os
-import warnings
-import cv2
 import argparse
-from pathlib import Path
+import time
+import cv2
 import numpy as np
-from anomalib.deploy import TorchInferencer
+import onnxruntime as ort
+import os
 
-os.environ["TRUST_REMOTE_CODE"] = "1"
-warnings.filterwarnings("ignore", message=".*TorchInferencer is a legacy inferencer.*")
+def preprocess_image(image_path: str, input_shape: tuple) -> np.ndarray:
+    """
+    Reads and preprocesses the image to match the ONNX model requirements.
+    
+    Args:
+        image_path: Path to the input image.
+        input_shape: Expected shape from the ONNX session (batch, channels, height, width).
+    
+    Returns:
+        A preprocessed numpy array of shape (1, C, H, W).
+    """
+    _, channels, h, w = input_shape
+    target_size = (w, h) if isinstance(w, int) and isinstance(h, int) else (256, 256)
 
-def run_inference(model_path: str, input_path: str, output_root: str, device: str = "cpu"):
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Could not read image at {image_path}")
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    img = cv2.resize(img, target_size)
+    img = img.astype(np.float32) / 255.0
+    img = np.transpose(img, (2, 0, 1))
+    img = np.expand_dims(img, axis=0)
+    
+    return img
+
+def benchmark_inference(session: ort.InferenceSession, input_name: str, input_data: np.ndarray, iterations: int):
     """
-    Standalone inference module to process images using an exported Anomalib .pt model.
+    Runs the inference loop to calculate average processing time.
     """
-    # Initialize the Inferencer
-    # The .pt file contains the model weights, architecture, and required transforms.
+    print("Running warm-up (This might take longer for TensorRT if engine is building)...")
+    for _ in range(50):
+        session.run(None, {input_name: input_data})
+
+    print(f"Running benchmark for {iterations} iterations...")
+    start_time = time.perf_counter()
+    
+    for _ in range(iterations):
+        session.run(None, {input_name: input_data})
+        
+    end_time = time.perf_counter()
+
+    total_time = end_time - start_time
+    avg_batch_time = total_time / iterations
+    
+    return total_time, avg_batch_time
+
+def main():
+    parser = argparse.ArgumentParser(description="ONNX Inference Benchmark: Batch 1 vs Batch 17")
+    parser.add_argument("--model", type=str, required=True, help="Path to the .onnx model file")
+    parser.add_argument("--image", type=str, required=True, help="Path to the input image to replicate")
+    parser.add_argument("--iterations", type=int, default=1000, help="Number of inference iterations (default: 1000)")
+    # Added 'tensorrt' to the choices
+    parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda", "tensorrt"], help="Execution provider")
+    args = parser.parse_args()
+
+    # Configure the Execution Provider
+    providers = []
+    
+    if args.device == "tensorrt":
+        # TensorRT configuration with engine caching to avoid rebuilding the engine every run
+        trt_cache_path = "./trt_engines"
+        os.makedirs(trt_cache_path, exist_ok=True)
+        
+        trt_options = {
+            'trt_engine_cache_enable': True,
+            'trt_engine_cache_path': trt_cache_path,
+            'trt_fp16_enable': True, # Enable Mixed Precision if your GPU supports it
+        }
+        
+        # Fallback cascade: TensorRT -> CUDA -> CPU
+        providers = [
+            ('TensorrtExecutionProvider', trt_options),
+            'CUDAExecutionProvider',
+            'CPUExecutionProvider'
+        ]
+    elif args.device == "cuda":
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+    else:
+        providers = ['CPUExecutionProvider']
+    
+    # Initialize ONNX Session
     try:
-        inferencer = TorchInferencer(path=model_path, device=device)
-        print(f"[INFO] Model loaded successfully from {model_path}")
+        session = ort.InferenceSession(args.model, providers=providers)
+        
+        # Verify which provider was actually assigned
+        active_providers = session.get_providers()
+        print(f"[INFO] ONNX Model loaded successfully.")
+        print(f"[INFO] Requested device: {args.device.upper()}")
+        print(f"[INFO] Active Execution Providers: {active_providers}")
+        
     except Exception as e:
-        print(f"[ERROR] Failed to load model: {e}")
+        print(f"[ERROR] Failed to load ONNX model: {e}")
         return
 
-    # Setup Paths
-    input_path_obj = Path(input_path)
-    output_path_obj = Path(output_root)
-    output_path_obj.mkdir(parents=True, exist_ok=True)
+    # Extract input metadata
+    input_meta = session.get_inputs()[0]
+    input_name = input_meta.name
+    input_shape = input_meta.shape
+    print(f"[INFO] Expected model input shape: {input_shape}")
 
-    # Filter for valid image extensions based on your config
-    valid_extensions = {".bmp", ".png", ".jpg", ".jpeg"}
+    # Prepare Single Image (Batch Size 1)
+    img_b1 = preprocess_image(args.image, input_shape)
+
+    print("\n--- Starting Batch Size 1 Benchmark ---")
+    _, avg_time_b1 = benchmark_inference(session, input_name, img_b1, args.iterations)
+    avg_time_per_img_b1 = avg_time_b1 / 1.0
+
+    # Auto-detect if the model is Patchcore
+    model_filename = os.path.basename(args.model).lower()
+    is_patchcore = "patchcore" in model_filename
+
+    if is_patchcore:
+        print("\n--- Skipping Batch Size 17 Benchmark ---")
+        print("[INFO] Detected a Patchcore model. ONNX Patchcore models are restricted to Batch Size = 1.")
+        
+        print("\n===========================================")
+        print("            BENCHMARK RESULTS              ")
+        print("===========================================")
+        print(f"Model Type: PATCHCORE")
+        print(f"Iterations per configuration: {args.iterations}")
+        print(f"Provider Priority: {providers[0] if isinstance(providers[0], str) else providers[0][0]}")
+        print("-" * 43)
+        print(f"BATCH SIZE 1:")
+        print(f"  Avg time per image:  {avg_time_per_img_b1 * 1000:.2f} ms")
+        print("===========================================")
     
-    if input_path_obj.is_file():
-        image_list = [input_path_obj]
     else:
-        image_list = [p for p in input_path_obj.iterdir() if p.suffix.lower() in valid_extensions]
+        img_b17 = np.repeat(img_b1, 17, axis=0)
+        
+        print("\n--- Starting Batch Size 17 Benchmark ---")
+        try:
+            _, avg_time_b17 = benchmark_inference(session, input_name, img_b17, args.iterations)
+            avg_time_per_img_b17 = avg_time_b17 / 17.0
+        except Exception as e:
+            print(f"\n[ERROR] Batch 17 failed. Error: {e}")
+            return
 
-    print(f"[INFO] Processing {len(image_list)} images...")
-
-    # Inference Loop
-    # Inference Loop
-    for img_path in image_list:
-        # Load image with OpenCV in BGR format (Standard for OpenCV saving)
-        original_bgr = cv2.imread(str(img_path))
-        if original_bgr is None:
-            print(f"[WARNING] Skipping {img_path.name}, could not read file.")
-            continue
-            
-        # Convert BGR to RGB for the model prediction
-        image_rgb = cv2.cvtColor(original_bgr, cv2.COLOR_BGR2RGB)
-
-        # Predict using the loaded TorchInferencer
-        predictions = inferencer.predict(image=image_rgb)
-
-        # Determine status and safely extract the score
-        status = "REJECT" if predictions.pred_label else "GOOD"
-        raw_score = predictions.pred_score
-        score = raw_score.item() if hasattr(raw_score, 'item') else float(raw_score)
-
-        print(f"Image: {img_path.name} | Status: {status} | Score: {score:.4f}")
-
-        if predictions.anomaly_map is not None:
-            
-            # Prepare the Heatmap Overlay
-            a_map = predictions.anomaly_map
-            a_map = a_map.detach().cpu().numpy().squeeze() if hasattr(a_map, 'cpu') else a_map.squeeze()
-            
-            # Create the colored heatmap
-            heatmap_norm = cv2.normalize(a_map, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-            heatmap_colored = cv2.applyColorMap(heatmap_norm, cv2.COLORMAP_JET)
-            
-            # Ensure dimensions match before overlaying
-            if heatmap_colored.shape[:2] != original_bgr.shape[:2]:
-                heatmap_colored = cv2.resize(heatmap_colored, (original_bgr.shape[1], original_bgr.shape[0]))
-                
-            # Superimpose the heatmap onto the original image (50% transparency)
-            overlay_img = cv2.addWeighted(original_bgr, 0.5, heatmap_colored, 0.5, 0)
-
-            # Prepare the Segmentation Mask (Contours)
-            segmentation_img = original_bgr.copy()
-            
-            if predictions.pred_mask is not None:
-                p_mask = predictions.pred_mask
-                p_mask = p_mask.detach().cpu().numpy().squeeze() if hasattr(p_mask, 'cpu') else p_mask.squeeze()
-                
-                # Convert binary mask to 0-255 uint8 format
-                mask_uint8 = (p_mask * 255).astype(np.uint8) if p_mask.max() <= 1.0 else p_mask.astype(np.uint8)
-                
-                if mask_uint8.shape[:2] != original_bgr.shape[:2]:
-                    mask_uint8 = cv2.resize(mask_uint8, (original_bgr.shape[1], original_bgr.shape[0]), interpolation=cv2.INTER_NEAREST)
-
-                # Extract boundaries of the defect and draw them in red
-                contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                cv2.drawContours(segmentation_img, contours, -1, (0, 0, 255), 2)
-                
-                # Optional: Also draw contours on the heatmap overlay for better clarity
-                cv2.drawContours(overlay_img, contours, -1, (0, 0, 255), 2)
-
-            # Concatenate horizontally to create the Anomalib-style grid 
-            # [Original | Heatmap Overlay | Segmentation Boundaries]
-            combined_result = np.hstack((original_bgr, overlay_img, segmentation_img))
-            
-            # Save the final concatenated image
-            save_name = f"{status}_{score:.3f}_{img_path.name}"
-            cv2.imwrite(str(output_path_obj / save_name), combined_result)
+        print("\n===========================================")
+        print("            BENCHMARK RESULTS              ")
+        print("===========================================")
+        print(f"Iterations per configuration: {args.iterations}")
+        print(f"Provider Priority: {providers[0] if isinstance(providers[0], str) else providers[0][0]}")
+        print("-" * 43)
+        print(f"BATCH SIZE 1:")
+        print(f"  Avg time per batch:  {avg_time_b1 * 1000:.2f} ms")
+        print(f"  Avg time per image:  {avg_time_per_img_b1 * 1000:.2f} ms")
+        print("-" * 43)
+        print(f"BATCH SIZE 17:")
+        print(f"  Avg time per batch:  {avg_time_b17 * 1000:.2f} ms")
+        print(f"  Avg time per image:  {avg_time_per_img_b17 * 1000:.2f} ms")
+        print("===========================================")
+        
+        speedup = avg_time_per_img_b1 / avg_time_per_img_b17
+        print(f"CONCLUSION: Batch 17 processes an individual image {speedup:.2f}x faster than Batch 1.")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Standalone Anomalib Inference Module")
-    parser.add_argument("--weights", type=str, required=True, help="Path to the exported model.pt file")
-    parser.add_argument("--input", type=str, required=True, help="Path to an image or a directory of images")
-    parser.add_argument("--output", type=str, default="results/inference_results", help="Directory to save output heatmaps")
-    parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda"], help="Device to run inference on")
-
-    args = parser.parse_args()
-    
-    run_inference(
-        model_path=args.weights,
-        input_path=args.input,
-        output_root=args.output,
-        device=args.device
-    )
+    main()

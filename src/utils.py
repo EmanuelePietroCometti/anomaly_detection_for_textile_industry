@@ -219,7 +219,8 @@ def rename_run_and_update_symlink(symlink_path, backbone, layers, config):
 
 def export_model_to_onnx(model, config, engine, ckpt_path=None):
     """
-    Universal function to export any trained Anomalib model to ONNX format.
+    Universal function to export trained Anomalib (>=2.2.0) models to ONNX format.
+    Optimized for PyTorch 2.11.0 and ONNXRuntime-GPU >=1.27.0.
 
     Args:
         model: The initialized and trained Anomalib model object.
@@ -227,13 +228,14 @@ def export_model_to_onnx(model, config, engine, ckpt_path=None):
         engine (Engine): The fitted Anomalib Engine instance.
         ckpt_path (str, optional): Path to a specific checkpoint.
     """
+    # Safely extract paths and configurations
     export_dir = config.get("paths", {}).get("exports_onnx_path", "results/exports")
-
     model_name = model.__class__.__name__
     model_arch = config.get("model_architecture", {})
     backbone = model_arch.get("backbone", "default_backbone")
     gen_config = config.get("general_configuration", {})
 
+    # Define input dimensions based on the model type
     if model_name.lower() == "patchcore" and "efficientnet" in backbone:
         input_size = tuple(gen_config.get("crop_size", [224, 224]))
     else:
@@ -242,18 +244,32 @@ def export_model_to_onnx(model, config, engine, ckpt_path=None):
     print(f"\n--- Starting ONNX export for {model_name} ---")
     print(f"Input dimensions expected by the ONNX graph: {input_size}")
 
+    # Explicitly map the batch dimension (index 0) to a dynamic string ('batch_size')
+    dynamic_batch_config = {
+        "input": {0: "batch_size"},
+        "output": {0: "batch_size"}
+    }
+
     try:
+        # Anomalib 2.2.0+ engine.export wrapper
         export_path = engine.export(
             model=model,
             export_type=ExportType.ONNX,
             export_root=export_dir,
             ckpt_path=ckpt_path,
             input_size=input_size,
-            onnx_kwargs={"dynamo": False}
+            # Kwargs passed directly to torch.onnx.export
+            onnx_kwargs={
+                "dynamo": False,               # Force TorchScript exporter (required for dynamic_axes dict)
+                "opset_version": 17,           # Recommended opset for ONNX >=1.21.0 and Torch 2.11
+                "input_names": ["input"],      # Bind input name to dynamic_axes key
+                "output_names": ["output"],    # Bind output name to dynamic_axes key
+                "dynamic_axes": dynamic_batch_config
+            }
         )
 
+        # Handle file renaming post-export
         timestamp = config.get("global_timestamp", "latest")
-
         export_path_str = str(export_path)
         directory, original_filename = os.path.split(export_path_str)
         _, extension = os.path.splitext(original_filename)
@@ -269,7 +285,7 @@ def export_model_to_onnx(model, config, engine, ckpt_path=None):
     except Exception as e:
         print(f"[ERROR] ONNX Export failed: {e}")
         return None
-    
+
 def export_model_to_pt(model, config, engine):
     """
     Universal function to export any trained Anomalib model to TORCH format.
@@ -278,7 +294,6 @@ def export_model_to_pt(model, config, engine):
         model: The initialized and trained Anomalib model object.
         config (dict): The configuration dictionary loaded from config.yaml.
         engine (Engine): The fitted Anomalib Engine instance.
-        ckpt_path (str, optional): Path to a specific checkpoint.
     """
     export_dir = config.get("paths", {}).get("exports_pt_path", "results/exports")
     model_name = model.__class__.__name__
@@ -286,6 +301,7 @@ def export_model_to_pt(model, config, engine):
     backbone = model_arch.get("backbone", "default_backbone")
     gen_config = config.get("general_configuration", {})
     
+    # Define input dimensions based on the model type
     if model_name.lower() == "patchcore" and "efficientnet" in backbone:
         input_size = tuple(gen_config.get("crop_size", [224, 224]))
     else:
@@ -295,14 +311,16 @@ def export_model_to_pt(model, config, engine):
     print(f"Input dimensions expected by the TORCH graph: {input_size}")
 
     try:
+        # Anomalib 2.2.0+ engine.export wrapper for TorchScript
         export_path = engine.export(
             model=model,
             export_type=ExportType.TORCH,
             export_root=export_dir,
+            input_size=input_size
         )
 
+        # Handle file renaming post-export
         timestamp = config.get("global_timestamp", "latest")
-
         export_path_str = str(export_path)
         directory, original_filename = os.path.split(export_path_str)
         _, extension = os.path.splitext(original_filename)
