@@ -17,7 +17,7 @@ from anomalib.engine import Engine
 from anomalib.models import EfficientAd
 from anomalib.models.image.efficient_ad.lightning_model import EfficientAdModelSize
 
-from src.config import load_config # Corrected import based on your project structure
+from config import load_config
 
 def objective(trial, base_config):
     """
