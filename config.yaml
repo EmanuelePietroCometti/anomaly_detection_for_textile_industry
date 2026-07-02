@@ -88,9 +88,9 @@ efficientad_configuration:
   num_epochs: 100
   train_batch_size: 1 # Efficient AD require a fixed batch size equal to 1 to correctly handling the knowledge distillation
   eval_batch_size: 32
-  model_size: "s"
-  learning_rate: 0.0001
-  weight_decay: 0.00001
+  model_size: "m"
+  learning_rate: 0.00013
+  weight_decay: 6.7e-05
 
 Patchcore_configuration:
   num_epochs: 200
@@ -104,7 +104,7 @@ supersimplenet_configuration:
   num_epochs: 10      
   train_batch_size: 4
   eval_batch_size: 8
-  learning_rate: 0.0001       
+  learning_rate: 0.0001      
   weight_decay: 0.00001
   supervised: False
   perlin_threshold: 0.2
