@@ -155,7 +155,13 @@ _METADATA_BY_ARCH = {
 def _write_metadata(onnx_path: str, model_name: str) -> None:
     import onnx
     key = "efficientad" if "efficientad" in model_name.lower() else "patchcore"
-    meta = {"anomaly_export_contract": "1.0", **_METADATA_BY_ARCH[key]}
+    # weights_source: this exporter only ever runs on the trained LightningModule
+    # coming out of engine.fit, so there is no random-weights path here; the key
+    # exists for uniformity with the other exporters (the runtime logs it, and
+    # refuses "random_self_test" models).
+    meta = {"anomaly_export_contract": "1.0",
+            "weights_source": f"trained:{model_name}",
+            **_METADATA_BY_ARCH[key]}
     m = onnx.load(onnx_path)
     for k, v in meta.items():
         entry = m.metadata_props.add()
