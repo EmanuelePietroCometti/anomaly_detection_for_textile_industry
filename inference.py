@@ -72,7 +72,9 @@ def main():
         trt_options = {
             'trt_engine_cache_enable': True,
             'trt_engine_cache_path': trt_cache_path,
-            'trt_fp16_enable': True, # Enable Mixed Precision if your GPU supports it
+            'trt_int8_enable': False,
+            'trt_fp16_enable': False, # Enable Mixed Precision if your GPU supports it
+            'trt_max_workspace_size': 10 * 1024 * 1024 * 1024,
         }
         
         # Fallback cascade: TensorRT -> CUDA -> CPU
