@@ -241,49 +241,41 @@ def export_model_to_onnx(model, config, engine, ckpt_path=None):
     else:
         input_size = tuple(gen_config.get("image_size", [256, 256]))
 
-    print(f"\n--- Starting ONNX export for {model_name} ---")
+    print(f"\n--- Starting PURE ONNX export for {model_name} ---")
     print(f"Input dimensions expected by the ONNX graph: {input_size}")
 
-    # Explicitly map the batch dimension (index 0) to a dynamic string ('batch_size')
-    dynamic_batch_config = {
-        "input": {0: "batch_size"},
-        "output": {0: "batch_size"}
-    }
+    # NOTE: we intentionally DO NOT use ``engine.export(ExportType.ONNX)`` here.
+    # In anomalib 2.x that bakes the PreProcessor (Resize + ImageNet Normalize)
+    # AND the PostProcessor (min-max + threshold) into the graph. The GPU runtime
+    # (inference_simulation) already does resize/normalize on the host and its own
+    # folder-global min-max, so the engine.export graph double-processed every
+    # image -> meaningless map/score. Instead we export the *inner* torch module
+    # (model.model) as a pure forward pass with the uniform contract:
+    #   input_tensor float32 [B,3,H,W] (host-normalized)
+    #   -> anomaly_map [B,1,H,W] (raw, no blur), anomaly_score [B] (raw)
+    from .export_anomalib_onnx import export_pure_onnx, verify_parity
 
     try:
-        # Anomalib 2.2.0+ engine.export wrapper
-        export_path = engine.export(
-            model=model,
-            export_type=ExportType.ONNX,
-            export_root=export_dir,
-            ckpt_path=ckpt_path,
-            input_size=input_size,
-            # Kwargs passed directly to torch.onnx.export
-            onnx_kwargs={
-                "dynamo": False,               # Force TorchScript exporter (required for dynamic_axes dict)
-                "opset_version": 17,           # Recommended opset for ONNX >=1.21.0 and Torch 2.11
-                "input_names": ["input"],      # Bind input name to dynamic_axes key
-                "output_names": ["output"],    # Bind output name to dynamic_axes key
-                "dynamic_axes": dynamic_batch_config
-            }
-        )
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = model.to(device).eval()
 
-        # Handle file renaming post-export
         timestamp = config.get("global_timestamp", "latest")
-        export_path_str = str(export_path)
-        directory, original_filename = os.path.split(export_path_str)
-        _, extension = os.path.splitext(original_filename)
+        layers = "-".join(model_arch.get("layers", []))
+        os.makedirs(export_dir, exist_ok=True)
+        onnx_path = os.path.join(export_dir, f"{timestamp}_{model_name}_{backbone}_{layers}.onnx")
 
-        new_filename = f"{timestamp}_{model_name}_{backbone}{extension}"
-        new_export_path = os.path.join(directory, new_filename)
+        onnx_path, wrapper = export_pure_onnx(model, input_size, onnx_path, device=device)
 
-        os.rename(export_path_str, new_export_path)
+        # Prove exact PyTorch<->ONNX parity right after export (strict, atol=1e-5).
+        verify_parity(wrapper, onnx_path, input_size, device=device)
 
-        print(f"[SUCCESS] Model successfully exported and saved to: {new_export_path}")
-        return new_export_path
+        print(f"[SUCCESS] Pure ONNX model exported and verified: {onnx_path}")
+        return onnx_path
 
     except Exception as e:
+        import traceback
         print(f"[ERROR] ONNX Export failed: {e}")
+        traceback.print_exc()
         return None
 
 def export_model_to_pt(model, config, engine):
