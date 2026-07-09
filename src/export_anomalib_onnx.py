@@ -118,6 +118,51 @@ def _get_field(out, name, tuple_index):
     return out[tuple_index]
 
 
+# Embedded in the .onnx file so the inference runtime (inference_simulation) can
+# auto-configure blur/scoring per architecture instead of relying on CLI flags an
+# operator has to remember to set correctly (that exact class of bug produced
+# wrong scores for SK-RD4AD when run with SuperSimpleNet's defaults).
+#
+# "verified": "false" for BOTH entries below: unlike SuperSimpleNet and SK-RD4AD,
+# these values were NOT checked against a live anomalib install / trained
+# checkpoint (anomalib isn't available in this dev environment). score_source
+# ="graph" is correct by anomalib's architecture (both PatchcoreModel.forward and
+# EfficientAdModel.forward compute pred_score internally - PatchCore's from the
+# reweighted nearest-neighbor distance, EfficientAd's from the quantile-normalized
+# map - neither is literally map.max(), so score_from_map/map_max_blurred would be
+# wrong). The blur kernel/sigma guesses (matching anomalib's typical
+# GaussianBlur2d(sigma=4) default) are NOT confirmed for this repo's config and
+# MUST be validated with verify_parity(...) plus a real accuracy check (AUROC on
+# a labeled set) before trusting production verdicts.
+_METADATA_BY_ARCH = {
+    "patchcore": {
+        "architecture": "patchcore",
+        "score_source": "graph",
+        "blur_kernel_size": "25",
+        "blur_sigma": "4.0",
+        "verified": "false",
+    },
+    "efficientad": {
+        "architecture": "efficientad",
+        "score_source": "graph",
+        "blur_kernel_size": "0",   # best guess: EfficientAd's PDN path is not known to blur
+        "blur_sigma": "0.0",
+        "verified": "false",
+    },
+}
+
+
+def _write_metadata(onnx_path: str, model_name: str) -> None:
+    import onnx
+    key = "efficientad" if "efficientad" in model_name.lower() else "patchcore"
+    meta = {"anomaly_export_contract": "1.0", **_METADATA_BY_ARCH[key]}
+    m = onnx.load(onnx_path)
+    for k, v in meta.items():
+        entry = m.metadata_props.add()
+        entry.key, entry.value = k, v
+    onnx.save(m, onnx_path)
+
+
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
@@ -156,6 +201,7 @@ def export_pure_onnx(lightning_model, input_size, onnx_path: str, device: str = 
 
     import onnx
     onnx.checker.check_model(onnx_path)
+    _write_metadata(onnx_path, lightning_model.__class__.__name__)
     print(f"[OK] Pure ONNX export: {onnx_path}")
     print(f"     input 'input_tensor' : float32 [B,3,{h},{w}] (host-normalized)")
     print( "     output 'anomaly_map'  : float32 [B,1,H,W] (raw, no blur)")
