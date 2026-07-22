@@ -246,13 +246,13 @@ def export_model_to_onnx(model, config, engine, ckpt_path=None):
 
     # NOTE: we intentionally DO NOT use ``engine.export(ExportType.ONNX)`` here.
     # In anomalib 2.x that bakes the PreProcessor (Resize + ImageNet Normalize)
-    # AND the PostProcessor (min-max + threshold) into the graph. The GPU runtime
-    # (inference_simulation) already does resize/normalize on the host and its own
-    # folder-global min-max, so the engine.export graph double-processed every
-    # image -> meaningless map/score. Instead we export the *inner* torch module
-    # (model.model) as a pure forward pass with the uniform contract:
-    #   input_tensor float32 [B,3,H,W] (host-normalized)
-    #   -> anomaly_map [B,1,H,W] (raw, no blur), anomaly_score [B] (raw)
+    # AND the PostProcessor (min-max + threshold) into the graph, which clashed
+    # with the host runtime doing its own resize/normalize/min-max (every image
+    # was processed twice -> meaningless map/score). Instead we export the
+    # *inner* torch module (model.model) under the shared export contract 3.0
+    # (see export_common.py):
+    #   image float32 [B,3,H,W], RGB in [0,1] (ImageNet normalization IN-graph)
+    #   -> anomaly_map [B,1,H,W] (final, blur in-graph), anomaly_score [B] (final)
     from .export_anomalib_onnx import export_pure_onnx, verify_parity
 
     try:
@@ -266,7 +266,9 @@ def export_model_to_onnx(model, config, engine, ckpt_path=None):
 
         onnx_path, wrapper = export_pure_onnx(model, input_size, onnx_path, device=device)
 
-        # Prove exact PyTorch<->ONNX parity right after export (strict, atol=1e-5).
+        # Prove PyTorch<->ONNX parity right after export on [0,1] inputs,
+        # batch 1 and 4 (atol=1e-3: bit-exactness is impossible across kernels,
+        # this still catches real bugs like missing blur or wrong ops).
         verify_parity(wrapper, onnx_path, input_size, device=device)
 
         print(f"[SUCCESS] Pure ONNX model exported and verified: {onnx_path}")
