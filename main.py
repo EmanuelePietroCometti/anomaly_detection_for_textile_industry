@@ -26,7 +26,7 @@ from src.anomaly_patchcore import configure_patchcore
 from src.anomaly_ead import configure_efficientad
 from src.anomaly_rd4ad import configure_rd4ad
 from src.anomaly_supersimplenet import configure_supersimplenet
-from src.utils import export_model_to_onnx, rename_run_and_update_symlink, save_config_file, export_model_to_pt
+from src.utils import rename_run_and_update_symlink, save_config_file, export_model_to_pt
 
 def main():
     config = load_config()
@@ -174,9 +174,6 @@ def main():
         
         rename_run_and_update_symlink(symlink_path=paths["symlink_path"], backbone=model_arch["backbone"], layers=model_arch["layers"], config=config)
         save_config_file(config=config, model=model)
-
-        print(f"\nStarting ONNX Export for {args.baseline.upper()}...")
-        export_model_to_onnx(model=model, config=config, engine=engine)
         
 
         print(f"\nStarting PyTorch (.pt) Export for {args.baseline.upper()}...")

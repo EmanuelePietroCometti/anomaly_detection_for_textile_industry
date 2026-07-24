@@ -22,7 +22,8 @@ dependencies = [
     "albumentations (>=2.0.8,<3.0.0)",
     "onnx (>=1.21.0,<2.0.0)",
     "torchinfo (>=1.8.0,<2.0.0)",
-    "onnxruntime-gpu (>=1.27.0,<2.0.0)"
+    "onnxruntime-gpu (>=1.27.0,<2.0.0)",
+    "onnxruntime (>=1.27.0,<2.0.0)"
 ]
 
 [build-system]
