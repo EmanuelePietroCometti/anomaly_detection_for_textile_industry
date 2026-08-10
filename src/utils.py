@@ -217,69 +217,6 @@ def rename_run_and_update_symlink(symlink_path, backbone, layers, config):
         print(f"[ERROR] Rename/Symlink process failed: {e}")
         return False
 
-def export_model_to_onnx(model, config, engine, ckpt_path=None):
-    """
-    Universal function to export trained Anomalib (>=2.2.0) models to ONNX format.
-    Optimized for PyTorch 2.11.0 and ONNXRuntime-GPU >=1.27.0.
-
-    Args:
-        model: The initialized and trained Anomalib model object.
-        config (dict): The configuration dictionary loaded from config.yaml.
-        engine (Engine): The fitted Anomalib Engine instance.
-        ckpt_path (str, optional): Path to a specific checkpoint.
-    """
-    # Safely extract paths and configurations
-    export_dir = config.get("paths", {}).get("exports_onnx_path", "results/exports")
-    model_name = model.__class__.__name__
-    model_arch = config.get("model_architecture", {})
-    backbone = model_arch.get("backbone", "default_backbone")
-    gen_config = config.get("general_configuration", {})
-
-    # Define input dimensions based on the model type
-    if model_name.lower() == "patchcore" and "efficientnet" in backbone:
-        input_size = tuple(gen_config.get("crop_size", [224, 224]))
-    else:
-        input_size = tuple(gen_config.get("image_size", [256, 256]))
-
-    print(f"\n--- Starting PURE ONNX export for {model_name} ---")
-    print(f"Input dimensions expected by the ONNX graph: {input_size}")
-
-    # NOTE: we intentionally DO NOT use ``engine.export(ExportType.ONNX)`` here.
-    # In anomalib 2.x that bakes the PreProcessor (Resize + ImageNet Normalize)
-    # AND the PostProcessor (min-max + threshold) into the graph, which clashed
-    # with the host runtime doing its own resize/normalize/min-max (every image
-    # was processed twice -> meaningless map/score). Instead we export the
-    # *inner* torch module (model.model) under the shared export contract 3.0
-    # (see export_common.py):
-    #   image float32 [B,3,H,W], RGB in [0,1] (ImageNet normalization IN-graph)
-    #   -> anomaly_map [B,1,H,W] (final, blur in-graph), anomaly_score [B] (final)
-    from .export_anomalib_onnx import export_pure_onnx, verify_parity
-
-    try:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = model.to(device).eval()
-
-        timestamp = config.get("global_timestamp", "latest")
-        layers = "-".join(model_arch.get("layers", []))
-        os.makedirs(export_dir, exist_ok=True)
-        onnx_path = os.path.join(export_dir, f"{timestamp}_{model_name}_{backbone}_{layers}.onnx")
-
-        onnx_path, wrapper = export_pure_onnx(model, input_size, onnx_path, device=device)
-
-        # Prove PyTorch<->ONNX parity right after export on [0,1] inputs,
-        # batch 1 and 4 (atol=1e-3: bit-exactness is impossible across kernels,
-        # this still catches real bugs like missing blur or wrong ops).
-        verify_parity(wrapper, onnx_path, input_size, device=device)
-
-        print(f"[SUCCESS] Pure ONNX model exported and verified: {onnx_path}")
-        return onnx_path
-
-    except Exception as e:
-        import traceback
-        print(f"[ERROR] ONNX Export failed: {e}")
-        traceback.print_exc()
-        return None
-
 def export_model_to_pt(model, config, engine):
     """
     Universal function to export any trained Anomalib model to TORCH format.

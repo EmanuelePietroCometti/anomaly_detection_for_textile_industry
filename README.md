@@ -50,6 +50,6 @@ The script exposes 5 command-line arguments to configure and manage the pipeline
 
 When switching from one model to another (e.g., from Patchcore to RD4AD) or generating new data, it is crucial to correctly update the `config.yaml` file. Follow these three main rules:
 
-1. **Path Management (`paths`)**: The save paths must be checked and updated **every time** you intend to change the type of model to be executed. This prevents the accidental overwriting of reports, anomaly images, checkpoints, and exported models (ONNX) generated from previous runs.
+1. **Path Management (`paths`)**: The save paths must be checked and updated **every time** you intend to change the type of model to be executed. This prevents the accidental overwriting of reports, anomaly images, checkpoints, and exported models (`.pt`) generated from previous runs.
 2. **Model-Specific Settings**: It is not necessary to modify the entire file. You should **exclusively** check and adapt the section related to the target model you have chosen to train.
 3. **Dataset Versioning**: Every time the dataset is recreated (e.g., by calling the `--create-dataset` argument), it is mandatory to change the version by updating the `dataset_version` parameter.

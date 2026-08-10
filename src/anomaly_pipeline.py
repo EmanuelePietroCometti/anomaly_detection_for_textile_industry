@@ -118,7 +118,7 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     # Execute prediction loop safely
     predictions = engine.predict(model=model, dataloaders=datamodule.test_dataloader())
 
-    # Only clean cache, do NOT delete the engine so it survives for ONNX export
+    # Only clean cache, do NOT delete the engine so it survives for model export
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -177,12 +177,12 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         tensor_pixel_labels = torch.tensor(pixel_true_flat[indices])
         tensor_pixel_scores = torch.nan_to_num(tensor_pixel_scores, nan=0.0, posinf=1.0, neginf=0.0)
 
-        # 1. Image-Level Threshold Calibration
+        # Image-Level Threshold Calibration
         img_threshold_calc = F1AdaptiveThreshold(fields=["pred_score", "gt_label"]).to(tensor_scores.device)
         img_threshold_calc.update(types.SimpleNamespace(pred_score=tensor_scores, gt_label=tensor_labels))
         img_thresh = img_threshold_calc.compute().item()
 
-        # 2. Pixel-Level Threshold Calibration
+        # Pixel-Level Threshold Calibration
         px_threshold_calc = F1AdaptiveThreshold(fields=["pred_score", "gt_label"]).to(tensor_pixel_scores.device)
         px_threshold_calc.update(types.SimpleNamespace(pred_score=tensor_pixel_scores, gt_label=tensor_pixel_labels))
         px_thresh = px_threshold_calc.compute().item()
