@@ -67,3 +67,5 @@ custom_weights/
 memory_cuda.txt
 hyperparameter_optimization/
 trt_engines/
+imgs/
+models/
