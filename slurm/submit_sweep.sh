@@ -23,8 +23,8 @@ set -euo pipefail
 
 # --- ADATTA AI TUOI PERCORSI -------------------------------------------------
 export HOME_REPO="${HOME_REPO:-$PWD}"
-export DATASET_SRC="${DATASET_SRC:-$HOME/mla_group_08/TESI_EMA/anomaly_detection_for_textile_industry/data}"
-export IMAGENETTE_SRC="${IMAGENETTE_SRC:-$HOME/mla_group_08/TESI_EMA/anomaly_detection_for_textile_industry/data/imagenette_for_efficientad}"
+export DATASET_SRC="${DATASET_SRC:-$HOME/TESI_EMA/anomaly_detection_for_textile_industry/data}"
+export IMAGENETTE_SRC="${IMAGENETTE_SRC:-$HOME/TESI_EMA/anomaly_detection_for_textile_industry/data/imagenette_for_efficientad}"
 MAIL="${MAIL:-s346291@studenti.polito.it}"
 # -----------------------------------------------------------------------------
 
