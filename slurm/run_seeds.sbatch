@@ -9,7 +9,7 @@
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=96G
 #SBATCH --time=1-00:00:00
-#SBATCH --mail-type=FAIL
+#SBATCH --mail-type=FAIL  
 #SBATCH --mail-user=s346291@studenti.polito.it
 #
 # 12 core e 96 GB = quota di un nodo gpu_a40 per GPU (48 core / 4 GPU, RAM = 2x VRAM).
