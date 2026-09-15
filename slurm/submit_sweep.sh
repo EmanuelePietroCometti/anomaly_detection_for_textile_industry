@@ -23,9 +23,9 @@ set -euo pipefail
 
 # --- ADATTA AI TUOI PERCORSI -------------------------------------------------
 export HOME_REPO="${HOME_REPO:-$PWD}"
-export DATASET_SRC="${DATASET_SRC:-$HOME/datasets/mvtec}"
-export IMAGENETTE_SRC="${IMAGENETTE_SRC:-$HOME/datasets/imagenette_for_efficientad}"
-MAIL="${MAIL:-nome.cognome@studenti.polito.it}"
+export DATASET_SRC="${DATASET_SRC:-$HOME/data}"
+export IMAGENETTE_SRC="${IMAGENETTE_SRC:-$HOME/data/imagenette_for_efficientad}"
+MAIL="${MAIL:-s346291@studenti.polito.it}"
 # -----------------------------------------------------------------------------
 
 export SWEEP_ID="${SWEEP_ID:-sweep_$(date +%Y%m%d_%H%M%S)}"

@@ -65,7 +65,7 @@ IDX="${SLURM_ARRAY_TASK_ID:-0}"
 HOME_REPO="${HOME_REPO:-${SLURM_SUBMIT_DIR:-$PWD}}"
 SWEEP_SCRATCH="${SCRATCH_FLASH}/ad_sweeps/${SWEEP_ID}"
 CODE_DIR="${SWEEP_SCRATCH}/code"
-DATA_DIR="${SWEEP_SCRATCH}/data/mvtec"
+DATA_DIR="${SWEEP_SCRATCH}/data"
 IMAGENETTE_DIR="${SWEEP_SCRATCH}/data/imagenette_for_efficientad"
 
 if [[ ! -d "${CODE_DIR}" || ! -d "${DATA_DIR}" ]]; then
