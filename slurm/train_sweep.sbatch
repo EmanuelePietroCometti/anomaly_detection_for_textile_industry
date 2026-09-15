@@ -41,7 +41,7 @@ if [[ "${MODEL}" != "patchcore" && "${MODEL}" != "efficientad" ]]; then
     exit 2
 fi
 
-CATEGORIES=(carpet no_dust dustOnValidation dustOnValidationAndTrain)
+CATEGORIES=(carpet reda_baseline reda_dustOnValidation reda_dustValidationAndTrain)
 SEEDS=(0 1 2 42 101)
 
 N_SEEDS=${#SEEDS[@]}
@@ -56,7 +56,7 @@ SEED="${SEEDS[$((IDX % N_SEEDS))]}"
 HOME_REPO="${HOME_REPO:-${SLURM_SUBMIT_DIR:-$PWD}}"
 SWEEP_SCRATCH="${SCRATCH_FLASH}/ad_sweeps/${SWEEP_ID}"
 CODE_DIR="${SWEEP_SCRATCH}/code"
-DATA_DIR="${SWEEP_SCRATCH}/data/mvtec"
+DATA_DIR="${SWEEP_SCRATCH}/data"
 IMAGENETTE_DIR="${SWEEP_SCRATCH}/data/imagenette_for_efficientad"
 
 RUN_DIR="${SWEEP_SCRATCH}/runs/${MODEL}/${CATEGORY}/seed${SEED}"
