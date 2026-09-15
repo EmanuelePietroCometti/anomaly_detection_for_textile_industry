@@ -19,8 +19,9 @@ set -euo pipefail
 
 # --- ADATTA AI TUOI PERCORSI -------------------------------------------------
 export HOME_REPO="${HOME_REPO:-$PWD}"
-export DATASET_SRC="${DATASET_SRC:-$HOME/datasets/mvtec}"
-export IMAGENETTE_SRC="${IMAGENETTE_SRC:-$HOME/datasets/imagenette_for_efficientad}"
+export DATASET_SRC="${DATASET_SRC:-$HOME_REPO/data}"
+export IMAGENETTE_SRC="${IMAGENETTE_SRC:-$HOME_REPO/data/imagenette_for_efficientad}"
+ARRAY="${ARRAY:-0-19%4}"
 MAIL="${MAIL:-s346291@studenti.polito.it}"
 # -----------------------------------------------------------------------------
 
@@ -64,7 +65,12 @@ rsync -a --delete \
       --exclude 'data' --exclude '__pycache__' --exclude 'results' \
       "${HOME_REPO}/" "${SWEEP_SCRATCH}/code/"
 
-rsync -a "${DATASET_SRC}/" "${SWEEP_SCRATCH}/data/mvtec/"
+rsync -a --exclude 'imagenette_for_efficientad' --exclude 'dataset_retraining' \
+      "${DATASET_SRC}/" "${SWEEP_SCRATCH}/data/mvtec/"
+
+# cache pesi pre-popolata sul nodo di login (i nodi di calcolo non hanno rete)
+mkdir -p "${SWEEP_SCRATCH}/cache"
+rsync -a "${HOME}/.cache/torch" "${HOME}/.cache/huggingface" "${SWEEP_SCRATCH}/cache/" || true
 
 if [[ -d "${IMAGENETTE_SRC}" ]]; then
     rsync -a "${IMAGENETTE_SRC}/" "${SWEEP_SCRATCH}/data/imagenette_for_efficientad/"

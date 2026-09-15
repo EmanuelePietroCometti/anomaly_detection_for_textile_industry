@@ -41,8 +41,12 @@ if [[ "${MODEL}" != "patchcore" && "${MODEL}" != "efficientad" ]]; then
     exit 2
 fi
 
-CATEGORIES=(carpet reda_baseline reda_dustOnValidation reda_dustValidationAndTrain)
+read -r -a CATEGORIES <<< "${CATEGORIES:-carpet reda_baseline reda_dustOnValidation reda_dustValidationAndTrain}"
 SEEDS=(0 1 2 42 101)
+if (( ${#CATEGORIES[@]} * ${#SEEDS[@]} != 20 )); then
+    echo "[error] griglia != 20 task: ${#CATEGORIES[@]} cat x ${#SEEDS[@]} seed" >&2
+    exit 2
+fi
 
 N_SEEDS=${#SEEDS[@]}
 IDX="${SLURM_ARRAY_TASK_ID:-0}"
@@ -72,8 +76,12 @@ fi
 # ============================== environment ==================================
 # --- ADATTA AL TUO AMBIENTE --------------------------------------------------
 module purge
-module load nvhpc-hpcx-cuda12/25.1
-source "${HOME}/venvs/anomalib/bin/activate"
+# torch da conda/pip porta il proprio runtime CUDA: non caricare nvhpc,
+# LD_LIBRARY_PATH finirebbe per mascherare le libs del wheel.
+source "${CONDA_ROOT:-$HOME/miniconda3}/etc/profile.d/conda.sh"
+conda activate "${HOME}/env_ema_tesi"
+python -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" \
+    || { echo "[error] torch non vede la GPU" >&2; exit 4; }
 # -----------------------------------------------------------------------------
 
 export OMP_NUM_THREADS=1
@@ -82,9 +90,11 @@ export PYTHONUNBUFFERED=1
 export TOKENIZERS_PARALLELISM=false
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # Keep torch/HF caches off $HOME: they are hot data and the NAS is slow.
+export HF_HOME="${SWEEP_SCRATCH}/cache/huggingface"
+export HF_HUB_OFFLINE=1
 export TORCH_HOME="${SWEEP_SCRATCH}/cache/torch"
 export XDG_CACHE_HOME="${SWEEP_SCRATCH}/cache"
-mkdir -p "${TORCH_HOME}"
+mkdir -p "${TORCH_HOME}" "${HF_HOME}"
 
 echo "=============================================================="
 echo "job       : ${SLURM_JOB_ID:-local}  (array ${SLURM_ARRAY_JOB_ID:-?} task ${IDX})"
@@ -99,8 +109,8 @@ echo "=============================================================="
 
 # The guide is explicit: without --gres you get a GPU node but no GPU.
 # Fail here rather than after an hour of silent CPU training.
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
-if ! nvidia-smi -L | grep -q GPU; then
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
+if ! nvidia-smi -L 2>/dev/null | grep -q GPU; then
     echo "[error] no GPU visible - check --gres=gpu:1" >&2
     exit 4
 fi
