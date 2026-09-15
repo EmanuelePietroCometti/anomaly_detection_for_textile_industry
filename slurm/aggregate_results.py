@@ -33,7 +33,8 @@ except ImportError:  # provenance becomes best-effort without PyYAML
     yaml = None
 
 MODELS = ["patchcore", "efficientad"]
-CATEGORIES = ["carpet", "no_dust", "dustOnValidation", "dustOnValidationAndTrain"]
+CATEGORIES = ["carpet", "reda_baseline", "reda_dustOnValidation",
+              "reda_dustValidationAndTrain"]
 
 # Metrics parsed out of the report, in the order they appear in the CSV.
 METRICS = ["auroc", "aupro", "ap_loc", "f1", "recall", "precision", "accuracy"]

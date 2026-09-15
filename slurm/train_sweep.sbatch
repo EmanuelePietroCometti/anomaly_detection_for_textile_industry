@@ -9,16 +9,20 @@
 # $SCRATCH_FLASH, validates the grid, and chains this with --dependency.
 #
 # Run list order (categories outer, seeds inner):
-#   task 0 -> carpet/0  carpet/1  carpet/2  carpet/42
-#   task 1 -> carpet/101  no_dust/0  no_dust/1  no_dust/2
-#   task 2 -> no_dust/42  no_dust/101  dustOnValidation/0  dustOnValidation/1
-#   task 3 -> dustOnValidation/2  /42  /101  dustOnValidationAndTrain/0
-#   task 4 -> dustOnValidationAndTrain/1  /2  /42  /101
+#   task 0 -> carpet/0 /1 /2 /42
+#   task 1 -> carpet/101  reda_baseline/0 /1 /2
+#   task 2 -> reda_baseline/42 /101  reda_dustOnValidation/0 /1
+#   task 3 -> reda_dustOnValidation/2 /42 /101  reda_dustValidationAndTrain/0
+#   task 4 -> reda_dustValidationAndTrain/1 /2 /42 /101
 # =============================================================================
 #SBATCH --job-name=ad_sweep
 #SBATCH --output=slurm_logs/%x_%A_%a.out
 #SBATCH --error=slurm_logs/%x_%A_%a.err
-#SBATCH --array=0-4%2
+# NOTE: no #SBATCH --array directive here on purpose. Legion has
+# MaxArraySize=0 (job arrays disabled), so a directive in this file would
+# be rejected at submission even when submit_sweep.sh does not want an
+# array. submit_sweep.sh passes --array on the command line when the
+# cluster supports it, and TASK_ID otherwise.
 #SBATCH --nodes=1
 #SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=4
@@ -45,8 +49,10 @@ if [[ "${MODEL}" != "patchcore" && "${MODEL}" != "efficientad" ]]; then
     exit 2
 fi
 
-CATEGORIES=(carpet no_dust dustOnValidation dustOnValidationAndTrain)
-SEEDS=(0 1 2 42 101)
+# Single source of truth: submit_sweep.sh exports these as space-separated
+# strings, so the grid here can never drift from the one used to size the array.
+read -r -a CATEGORIES <<< "${SWEEP_CATEGORIES:-carpet reda_baseline reda_dustOnValidation reda_dustValidationAndTrain}"
+read -r -a SEEDS      <<< "${SWEEP_SEEDS:-0 1 2 42 101}"
 GPUS_PER_JOB="${GPUS_PER_JOB:-4}"
 
 RUNS=()
@@ -56,7 +62,9 @@ for C in "${CATEGORIES[@]}"; do
     done
 done
 
-IDX="${SLURM_ARRAY_TASK_ID:-0}"
+# SLURM_ARRAY_TASK_ID inside a job array; TASK_ID when arrays are
+# unavailable and submit_sweep.sh falls back to individual jobs.
+IDX="${SLURM_ARRAY_TASK_ID:-${TASK_ID:-0}}"
 
 # ============================ paths and staging ==============================
 : "${SCRATCH_FLASH:?SCRATCH_FLASH is not set - are you on a Legion node?}"
@@ -65,6 +73,8 @@ IDX="${SLURM_ARRAY_TASK_ID:-0}"
 HOME_REPO="${HOME_REPO:-${SLURM_SUBMIT_DIR:-$PWD}}"
 SWEEP_SCRATCH="${SCRATCH_FLASH}/ad_sweeps/${SWEEP_ID}"
 CODE_DIR="${SWEEP_SCRATCH}/code"
+# The repo keeps categories directly under data/, with imagenette alongside
+# them (it is not a category, the grid never looks at it).
 DATA_DIR="${SWEEP_SCRATCH}/data"
 IMAGENETTE_DIR="${SWEEP_SCRATCH}/data/imagenette_for_efficientad"
 
@@ -78,7 +88,7 @@ fi
 # --- ADATTA AL TUO AMBIENTE --------------------------------------------------
 module purge
 module load nvhpc-hpcx-cuda12/25.1
-source "${HOME}/venvs/anomalib/bin/activate"
+source "${VENV_PATH:-${HOME}/env_ema_tesi}/bin/activate"
 # -----------------------------------------------------------------------------
 
 export OMP_NUM_THREADS=1

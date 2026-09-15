@@ -73,7 +73,7 @@ def main() -> int:
     ap.add_argument("--model", required=True, choices=sorted(MODEL_CLASS))
     ap.add_argument("--category", required=True)
     ap.add_argument("--seed", type=int, required=True)
-    ap.add_argument("--dataset-root", default="./data/mvtec",
+    ap.add_argument("--dataset-root", default="./data",
                     help="directory holding the categories (on Legion: the copy "
                          "staged under $SCRATCH_FLASH)")
     ap.add_argument("--imagenette-dir", default=None,
