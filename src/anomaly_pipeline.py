@@ -57,7 +57,7 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
 
     # ENGINE INITIALIZATION
     checkpoint_callback = ModelCheckpoint(
-        dirpath="checkpoints", 
+        dirpath=config.get("paths", {}).get("checkpoint_dir", "checkpoints"),
         filename=f"{model_name}-latest", 
         every_n_epochs=20, 
         save_top_k=-1, 
@@ -69,6 +69,7 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
         callbacks=[checkpoint_callback, TimerCallback()],
         accelerator="gpu",
         devices=1,
+        default_root_dir=config.get("paths", {}).get("default_root_dir", "results"),
         precision=gen_config.get("precision", "32-true"), 
         log_every_n_steps=50,
         check_val_every_n_epoch=1

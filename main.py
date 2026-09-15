@@ -17,6 +17,7 @@ cv2.setNumThreads(0)
 import glob
 import argparse
 from datetime import datetime
+from lightning.pytorch import seed_everything
 from src.config import load_config
 from src.dataset_utils import build_mutually_exclusive_datasets
 from src.transfer_learning import apply_transfer_learning
@@ -29,10 +30,6 @@ from src.anomaly_supersimplenet import configure_supersimplenet
 from src.utils import rename_run_and_update_symlink, save_config_file, export_model_to_pt
 
 def main():
-    config = load_config()
-    paths = config["paths"]
-    model_arch=config["model_architecture"]
-    
     argparser = argparse.ArgumentParser(description="Run the Anomaly Detection Pipeline")
     
     argparser.add_argument(
@@ -80,7 +77,23 @@ def main():
         help="Trigger supervised retraining on a small set of misclassified samples (only applicable if --mode is set to 'supervised')"
     )
 
+    argparser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Global random seed. Overrides run.seed in the config file."
+    )
+
     args = argparser.parse_args()
+
+    config = load_config()
+    paths = config["paths"]
+    model_arch = config["model_architecture"]
+
+    seed = args.seed if args.seed is not None else config.get("run", {}).get("seed", 42)
+    seed_everything(seed, workers=True)
+    config.setdefault("run", {})["seed"] = seed
+    print(f"\n[INFO] Global seed set to {seed}")
     
     if args.retrain:
         print("\n[WARNING] Supervised retraining enabled. Make sure to set --mode to 'supervised' and have the necessary labeled data available for retraining.")
