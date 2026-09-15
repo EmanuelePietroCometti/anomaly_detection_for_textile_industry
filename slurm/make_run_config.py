@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Generate a per-run config.yaml derived from the repository template.
 
@@ -5,9 +6,14 @@ Every run of the sweep (model x category x seed) gets its own YAML with:
   - datamodule_configuration.category  -> the MVTec class under test
   - run.seed                           -> consumed by main.py --seed / seed_everything
   - efficientad_configuration.imagenette_dir -> the staged copy on $SCRATCH_FLASH
-  - paths.*                            -> all rewritten under the run directory,
-                                          so 40 concurrent jobs never overwrite
-                                          each other's results, checkpoints or exports.
+  - run.gpu_slot                       -> which GPU of the node this run used
+  - paths.*                            -> all rewritten under the run directory, so
+                                          the 4 runs packed on one node (and every
+                                          other job) never overwrite each other's
+                                          results, checkpoints or exports.
+
+With --check-only the pre-flight validation runs and nothing is written: the
+staging job uses it to reject a broken grid before a GPU node is allocated.
 
 The generated file is also the artefact copied by save_config_file(), so each run
 ships a complete, self-describing record of the configuration it was trained with.
@@ -74,8 +80,12 @@ def main() -> int:
                     help="override efficientad_configuration.imagenette_dir")
     ap.add_argument("--slurm-job-id", default="",
                     help="recorded under run.slurm_job_id for traceability")
-    ap.add_argument("--run-dir", required=True, help="output directory for this single run")
-    ap.add_argument("--out", required=True, help="path of the generated config.yaml")
+    ap.add_argument("--gpu-slot", default="",
+                    help="GPU index this run was pinned to (CUDA_VISIBLE_DEVICES)")
+    ap.add_argument("--check-only", action="store_true",
+                    help="run the dataset pre-flight and exit without writing a config")
+    ap.add_argument("--run-dir", help="output directory for this single run")
+    ap.add_argument("--out", help="path of the generated config.yaml")
     ap.add_argument("--num-workers", type=int, default=None,
                     help="override datamodule num_workers (pass $SLURM_CPUS_PER_TASK)")
     ap.add_argument("--skip-dataset-check", action="store_true")
@@ -86,8 +96,12 @@ def main() -> int:
         print(f"[make_run_config] ERROR: template not found: {template}", file=sys.stderr)
         return 2
 
+    if not args.check_only and (args.run_dir is None or args.out is None):
+        print("[make_run_config] ERROR: --run-dir and --out are required "
+              "unless --check-only is given", file=sys.stderr)
+        return 2
+
     cfg = yaml.safe_load(template.read_text(encoding="utf-8"))
-    run_dir = Path(args.run_dir)
     model_class = MODEL_CLASS[args.model]
 
     ead = cfg.setdefault("efficientad_configuration", {})
@@ -105,6 +119,12 @@ def main() -> int:
                 print(f"  - {p}", file=sys.stderr)
             return 3
 
+    if args.check_only:
+        print(f"[make_run_config] pre-flight OK: {args.model} | {args.category}")
+        return 0
+
+    run_dir = Path(args.run_dir)
+
     # --- run provenance -------------------------------------------------------
     cfg["run"] = {
         "model": args.model,
@@ -112,6 +132,7 @@ def main() -> int:
         "seed": args.seed,
         "run_dir": str(run_dir),
         "slurm_job_id": args.slurm_job_id,
+        "gpu_slot": args.gpu_slot,
     }
 
     # --- dataset selection ----------------------------------------------------
