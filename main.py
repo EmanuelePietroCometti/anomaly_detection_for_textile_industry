@@ -16,9 +16,11 @@ cv2.setNumThreads(0)
 
 import glob
 import argparse
+import yaml
+from pathlib import Path
 from datetime import datetime
 from lightning.pytorch import seed_everything
-from src.config import load_config
+from src.config import load_config, apply_run_dir
 from src.dataset_utils import build_mutually_exclusive_datasets
 from src.transfer_learning import apply_transfer_learning
 from src.eda import apply_eda_analysis
@@ -84,6 +86,19 @@ def main():
         help="Global random seed. Overrides run.seed in the config file."
     )
 
+    argparser.add_argument(
+        "--category",
+        type=str,
+        default=None,
+        help="Overrides datamodule_configuration.category (the dataset folder under data/)."
+    )
+    argparser.add_argument(
+        "--run-dir",
+        type=str,
+        default=None,
+        help="Directory collecting ALL outputs of this run. Required for sweeps."
+    )
+
     args = argparser.parse_args()
 
     config = load_config()
@@ -115,6 +130,22 @@ def main():
         config['global_timestamp'] = datetime.now().strftime("%Y%m%d_%H%M%S")
     else:
         config["global_timestamp"] = args.timestamp
+
+    if args.category:
+        config["datamodule_configuration"]["category"] = args.category
+
+    config["datamodule_configuration"]["num_workers"] = int(
+        os.environ.get("SLURM_CPUS_PER_TASK", config["datamodule_configuration"].get("num_workers", 4))
+    )
+
+    if args.run_dir:
+        apply_run_dir(config, args.run_dir, args.baseline)
+        run_config_path = Path(args.run_dir) / "run_config.yaml"
+        config["paths"]["config_src_path"] = str(run_config_path)
+        run_config_path.write_text(
+            yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8"
+        )
+        print(f"[INFO] run dir: {args.run_dir}")
     
     if args.create_dataset:
         print("\nStarting dataset creation...")

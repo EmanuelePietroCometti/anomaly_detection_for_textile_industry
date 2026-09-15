@@ -67,8 +67,8 @@ transfer_learning:
   balancing_dataset: False
 
 datamodule_configuration:
-  root: "./data/mvtec"
-  category: "reda"
+  root: "./data"
+  category: "carpet"
   batch_size: 32
   num_workers: 4
 
@@ -91,14 +91,6 @@ efficientad_configuration:
   model_size: "s"
   learning_rate: 0.0001
   weight_decay: 0.00001
-
-Patchcore_configuration:
-  num_epochs: 200
-  train_batch_size: 64
-  eval_batch_size: 64
-  learning_rate: 0.005
-  weight_decay: 0.0001
-  optimizer: "adamw"  # Options: "adamw", "sgd", "adam"
 
 supersimplenet_configuration:
   num_epochs: 10      

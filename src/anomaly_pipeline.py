@@ -58,9 +58,8 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     # ENGINE INITIALIZATION
     checkpoint_callback = ModelCheckpoint(
         dirpath=config.get("paths", {}).get("checkpoint_dir", "checkpoints"),
-        filename=f"{model_name}-latest", 
-        every_n_epochs=20, 
-        save_top_k=-1, 
+        filename=f"{model_name}-latest",
+        save_top_k=0,
         save_last=True
     )
     
