@@ -17,14 +17,21 @@ dependencies = [
     "huggingface (>=0.0.1,<0.0.2)",
     "optuna (>=4.8.0,<5.0.0)",
     "seaborn (>=0.13.2,<0.14.0)",
-    "torch @ https://download.pytorch.org/whl/cu130/torch-2.11.0%2Bcu130-cp312-cp312-win_amd64.whl",
-    "torchvision @ https://download.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp312-cp312-win_amd64.whl",
     "albumentations (>=2.0.8,<3.0.0)",
     "onnx (>=1.21.0,<2.0.0)",
     "torchinfo (>=1.8.0,<2.0.0)",
     "onnxruntime-gpu (>=1.27.0,<2.0.0)",
     "onnxruntime (>=1.27.0,<2.0.0)"
 ]
+
+[[tool.poetry.source]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+priority = "explicit"
+
+[tool.poetry.dependencies]
+torch = { version = "2.8.0", source = "pytorch-cu128" }
+torchvision = { version = "0.23.0", source = "pytorch-cu128" }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
