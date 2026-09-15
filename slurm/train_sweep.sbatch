@@ -1,19 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Anomaly detection sweep on HPC@PoliTO Legion - full-node A40 packing.
+# Anomaly detection sweep on HPC@PoliTO Legion - 1 run per job.
 #
-# 4 categories x 5 seeds = 20 runs per model, 4 runs per job (one per GPU)
-# => 5 array tasks per model. Each task holds a whole gpu_a40 node.
+# 4 categories x 5 seeds = 20 runs per model, 1 run per job
+# => 20 array tasks per model.
 #
 # Do NOT submit by hand: submit_sweep.sh stages code and dataset onto
 # $SCRATCH_FLASH, validates the grid, and chains this with --dependency.
-#
-# Run list order (categories outer, seeds inner):
-#   task 0 -> carpet/0 /1 /2 /42
-#   task 1 -> carpet/101  reda_baseline/0 /1 /2
-#   task 2 -> reda_baseline/42 /101  reda_dustOnValidation/0 /1
-#   task 3 -> reda_dustOnValidation/2 /42 /101  reda_dustValidationAndTrain/0
-#   task 4 -> reda_dustValidationAndTrain/1 /2 /42 /101
 # =============================================================================
 #SBATCH --job-name=ad_sweep
 #SBATCH --output=slurm_logs/%x_%A_%a.out
@@ -24,20 +17,18 @@
 # array. submit_sweep.sh passes --array on the command line when the
 # cluster supports it, and TASK_ID otherwise.
 #SBATCH --nodes=1
-#SBATCH --ntasks=4
-#SBATCH --ntasks-per-node=4
+#SBATCH --ntasks=1
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
-#SBATCH --mem=384G
-#SBATCH --gres=gpu:4
+#SBATCH --mem=48G
+#SBATCH --gres=gpu:1
 #SBATCH --time=0-23:00:00
 #SBATCH --partition=gpu_a40
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=nome.cognome@studenti.polito.it     # <-- CAMBIA
+#SBATCH --mail-user=s346291@studenti.polito.it
 # -----------------------------------------------------------------------------
-# A whole gpu_a40 node: 4 GPUs, 4 tasks (1 per GPU), 12 cores per task = 48
-# cores, 384 GB = 4 x (2 x 48 GB VRAM). This is the guide's ratio applied to the
-# full node. The 4 runs are independent Python processes, not MPI ranks, so they
-# are launched as background subshells rather than through srun.
+# 1 GPU, 1 task, 12 cores, 48 GB RAM.
+# This follows the HPC@PoliTO guide ratio for gpu_a40 (48 cores / 4 GPUs = 12).
 # -----------------------------------------------------------------------------
 
 set -uo pipefail
@@ -53,7 +44,7 @@ fi
 # strings, so the grid here can never drift from the one used to size the array.
 read -r -a CATEGORIES <<< "${SWEEP_CATEGORIES:-carpet reda_baseline reda_dustOnValidation reda_dustValidationAndTrain}"
 read -r -a SEEDS      <<< "${SWEEP_SEEDS:-0 1 2 42 101}"
-GPUS_PER_JOB="${GPUS_PER_JOB:-4}"
+GPUS_PER_JOB="${GPUS_PER_JOB:-1}"
 
 RUNS=()
 for C in "${CATEGORIES[@]}"; do
@@ -96,7 +87,7 @@ export MKL_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 export TOKENIZERS_PARALLELISM=false
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
-# Shared by all 4 processes, kept off $HOME: caches are hot data, the NAS is slow.
+# Kept off $HOME: caches are hot data, the NAS is slow.
 export TORCH_HOME="${SWEEP_SCRATCH}/cache/torch"
 export XDG_CACHE_HOME="${SWEEP_SCRATCH}/cache"
 mkdir -p "${TORCH_HOME}"
@@ -112,7 +103,7 @@ echo "=============================================================="
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
 N_GPU=$(nvidia-smi -L | grep -c GPU || true)
 if [[ "${N_GPU}" -lt "${GPUS_PER_JOB}" ]]; then
-    echo "[error] ${GPUS_PER_JOB} GPUs requested, ${N_GPU} visible - check --gres=gpu:4" >&2
+    echo "[error] ${GPUS_PER_JOB} GPUs requested, ${N_GPU} visible - check --gres=gpu:${GPUS_PER_JOB}" >&2
     exit 4
 fi
 
@@ -125,13 +116,7 @@ run_one() {
     local run_config="${SWEEP_SCRATCH}/configs/${MODEL}_${category}_seed${seed}.yaml"
     local home_run_dir="${HOME_REPO}/sweeps/${SWEEP_ID}/${MODEL}/${category}/seed${seed}"
 
-    # One GPU per process: main.py and the anomalib Engine stay single-device,
-    # no code change needed.
     export CUDA_VISIBLE_DEVICES="${slot}"
-
-    # Stagger the starts so 4 processes don't hit the dataset and build their
-    # dataloaders at the same instant.
-    sleep $(( slot * 15 ))
 
     mkdir -p "${run_dir}"
     echo "[slot ${slot}] START ${category}/seed${seed} on GPU ${slot} at $(date -Is)"
@@ -160,8 +145,7 @@ run_one() {
         >> "${run_dir}/train.log" 2>&1
     local status=$?
 
-    # Sync this run home as soon as it finishes, not at the end of the job:
-    # if a sibling run later hits the walltime, these results are already safe.
+    # Sync this run home as soon as it finishes, not at the end of the job
     mkdir -p "${home_run_dir}"
     rsync -a "${run_dir}/" "${home_run_dir}/"
     cp "${run_config}" "${home_run_dir}/run_config.yaml" 2>/dev/null || true
@@ -170,7 +154,7 @@ run_one() {
     return ${status}
 }
 
-# ============================ launch the 4 runs ==============================
+# ============================ launch the run =================================
 PIDS=()
 LABELS=()
 
