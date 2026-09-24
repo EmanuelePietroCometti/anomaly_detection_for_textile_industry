@@ -99,6 +99,12 @@ def main():
         help="Overrides datamodule_configuration.root (the folder containing the category folders)."
     )
     argparser.add_argument(
+        "--imagenette-dir",
+        type=str,
+        default=None,
+        help="Overrides efficientad_configuration.imagenette_dir (ImageNette folder used by EfficientAD)."
+    )
+    argparser.add_argument(
         "--run-dir",
         type=str,
         default=None,
@@ -118,6 +124,9 @@ def main():
     
     if args.data_root:
         config["datamodule_configuration"]["root"] = args.data_root
+
+    if args.imagenette_dir:
+        config["efficientad_configuration"]["imagenette_dir"] = args.imagenette_dir
 
     if args.retrain:
         print("\n[WARNING] Supervised retraining enabled. Make sure to set --mode to 'supervised' and have the necessary labeled data available for retraining.")

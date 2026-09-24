@@ -16,10 +16,13 @@
 # gpu_a40 ha un tetto di 24h: se le run non ci stanno, lancia un seed per volta.
 #
 # uso:
-#   sbatch slurm/run_seeds.sbatch <cartella_dataset> <categoria>        # 5 seed x 1 modello
-#   sbatch slurm/run_seeds.sbatch <cartella_dataset> <categoria> 42     # un seed solo
+#   sbatch slurm/run_seeds_efficientad.sbatch <cartella_dataset> <categoria>        # 5 seed
+#   sbatch slurm/run_seeds_efficientad.sbatch <cartella_dataset> <categoria> 42     # un seed solo
 #
 # <cartella_dataset> contiene le categorie: <cartella_dataset>/<categoria>/{train/good,ground_truth,...}
+# ImageNette: di default <cartella_dataset>/imagenette_for_efficientad, altrimenti
+#   IMAGENETTE_DIR=/percorso sbatch slurm/run_seeds_efficientad.sbatch ...
+# Va scaricata una volta dal nodo di login (i nodi di calcolo non hanno rete).
 # Output: result_<modello>/seed<seed>/<categoria>/
 # Riprende: le run concluse lasciano un .done e vengono saltate.
 
@@ -38,6 +41,7 @@ mkdir -p slurm_logs
 # Percorso assoluto: un path relativo si intende rispetto alla dir da cui fai sbatch.
 [[ -d "${DATA_ROOT}" ]] || { echo "[error] cartella dataset inesistente: ${DATA_ROOT}"; exit 2; }
 DATA_ROOT="$(realpath "${DATA_ROOT}")"
+IMAGENETTE_DIR="${IMAGENETTE_DIR:-${DATA_ROOT}/imagenette_for_efficientad}"
 
 export PATH="${HOME}/env_ema_tesi/bin:${PATH}"
 export OMP_NUM_THREADS=1
@@ -48,9 +52,8 @@ export HF_HUB_OFFLINE=1        # i nodi di calcolo non hanno rete: usa la cache
 # Pre-flight: meglio morire qui che dopo un'ora di training.
 [[ -d "${DATA_ROOT}/${CATEGORY}/train/good" ]]   || { echo "[error] manca ${DATA_ROOT}/${CATEGORY}/train/good"; exit 2; }
 [[ -d "${DATA_ROOT}/${CATEGORY}/ground_truth" ]] || { echo "[error] manca ${DATA_ROOT}/${CATEGORY}/ground_truth"; exit 2; }
-if [[ " ${MODELS[*]} " == *" efficientad "* ]]; then
-  [[ -d "pre_trained/efficientad_pretrained_weights" ]] || { echo "[error] pesi EfficientAD non pre-scaricati"; exit 2; }
-fi
+[[ -d "pre_trained/efficientad_pretrained_weights" ]] || { echo "[error] pesi EfficientAD non pre-scaricati"; exit 2; }
+[[ -d "${IMAGENETTE_DIR}" ]] || { echo "[error] manca ImageNette in ${IMAGENETTE_DIR} (scaricala dal nodo di login)"; exit 2; }
 nvidia-smi -L | grep -q GPU              || { echo "[error] nessuna GPU: manca --gres?"; exit 3; }
 python -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" \
                                          || { echo "[error] torch non vede la GPU"; exit 3; }
@@ -69,6 +72,7 @@ for SEED in "${SEEDS[@]}"; do
     echo "===== ${CATEGORY} | seed ${SEED} | ${MODEL} | $(date -Is) ====="
     python main.py --baseline "${MODEL}" --seed "${SEED}" \
                    --data-root "${DATA_ROOT}" \
+                   --imagenette-dir "${IMAGENETTE_DIR}" \
                    --category "${CATEGORY}" --run-dir "${RUN_DIR}" \
       2>&1 | tee "${RUN_DIR}/train.log"
     rc=${PIPESTATUS[0]}

@@ -3,6 +3,7 @@ import numpy as np
 import types
 import os
 import gc
+import shutil
 from pathlib import Path
 from anomalib.data import Folder
 from anomalib.data.utils.split import ValSplitMode
@@ -11,6 +12,63 @@ from anomalib.callbacks import ModelCheckpoint, TimerCallback
 from anomalib.metrics import F1AdaptiveThreshold
 from src.visualization import save_evaluation_report, plot_auroc_curve
 from src.utils import save_prediction_triplet
+
+_IMG_EXTS = {".png", ".bmp", ".tif", ".tiff", ".jpg", ".jpeg"}
+
+
+def _find_mask(img: Path, candidates: list) -> Path:
+    """Maschera di img tra candidates: nome identico, poi <nome>_mask/_gt, poi unica che lo contiene."""
+    stem = img.stem
+    for rule in (
+        lambda m: m.stem == stem,
+        lambda m: m.stem in (f"{stem}_mask", f"{stem}_gt"),
+        lambda m: stem in m.stem,
+    ):
+        hits = [m for m in candidates if rule(m)]
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1:
+            raise ValueError(f"Maschera ambigua per {img}: {[h.name for h in hits[:5]]}")
+    raise FileNotFoundError(f"Nessuna maschera per {img}")
+
+
+def prepare_test_masks(dataset_path: Path, abnormal_dirs: list, out_dir: Path) -> Path:
+    """Costruisce in out_dir una cartella maschere con SOLO le immagini anomale di test.
+
+    anomalib (Folder) abbina maschere e immagini anomale per posizione dopo
+    averle ordinate: vuole una maschera per ogni immagine anomala e nient'altro.
+    Il ground_truth/ del dataset puo' contenere maschere di tutti gli split
+    (e dei good): qui si seleziona solo quello che serve, senza toccare il dataset.
+    Ogni maschera prende il nome dell'immagine, cosi' l'ordinamento coincide.
+    """
+    gt_root = dataset_path / "ground_truth"
+    if not gt_root.is_dir():
+        raise FileNotFoundError(f"Manca la cartella delle maschere: {gt_root}")
+
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+
+    n = 0
+    for rel in abnormal_dirs:                      # es. "test/nodo"
+        cls = Path(rel).name
+        img_dir = dataset_path / rel
+        gt_dir = gt_root / cls
+        if not gt_dir.is_dir():
+            raise FileNotFoundError(f"Manca la cartella maschere per il difetto '{cls}': {gt_dir}")
+        candidates = [m for m in gt_dir.rglob("*") if m.is_file() and m.suffix.lower() in _IMG_EXTS]
+        for img in sorted(p for p in img_dir.rglob("*") if p.is_file() and p.suffix.lower() in _IMG_EXTS):
+            mask = _find_mask(img, candidates)
+            dst = out_dir / cls / img.relative_to(img_dir).with_suffix(mask.suffix)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                dst.symlink_to(mask.resolve())
+            except OSError:                        # es. Windows senza permessi per i symlink
+                shutil.copy2(mask, dst)
+            n += 1
+
+    print(f"[INFO] Maschere di test: {n} selezionate da {gt_root} -> {out_dir}")
+    return out_dir
+
 
 def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     """
@@ -42,13 +100,18 @@ def run_anomaly_pipeline(model, config, project_name="anomaly-pipeline"):
     if test_path.exists():
         abnormal_dirs = [f"test/{d}" for d in os.listdir(test_path) if (test_path / d).is_dir() and d != "good"]
 
+    mask_dir = "ground_truth"
+    if abnormal_dirs:
+        mask_root = Path(config.get("paths", {}).get("default_root_dir", "results")) / "test_masks" / category
+        mask_dir = str(prepare_test_masks(dataset_path, abnormal_dirs, mask_root).resolve())
+
     datamodule = Folder(
         name=category,
         root=str(dataset_path),
         normal_dir="train/good",
         normal_test_dir="test/good",
         abnormal_dir=abnormal_dirs,
-        mask_dir="ground_truth",
+        mask_dir=mask_dir,
         train_batch_size=train_bs,
         eval_batch_size=eval_bs,
         num_workers=datamodule_cfg.get("num_workers", 4),

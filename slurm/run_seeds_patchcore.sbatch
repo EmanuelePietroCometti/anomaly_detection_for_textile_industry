@@ -16,8 +16,8 @@
 # gpu_a40 ha un tetto di 24h: se le run non ci stanno, lancia un seed per volta.
 #
 # uso:
-#   sbatch slurm/run_seeds.sbatch <cartella_dataset> <categoria>        # 5 seed x 1 modello
-#   sbatch slurm/run_seeds.sbatch <cartella_dataset> <categoria> 42     # un seed solo
+#   sbatch slurm/run_seeds_patchcore.sbatch <cartella_dataset> <categoria>        # 5 seed
+#   sbatch slurm/run_seeds_patchcore.sbatch <cartella_dataset> <categoria> 42     # un seed solo
 #
 # <cartella_dataset> contiene le categorie: <cartella_dataset>/<categoria>/{train/good,ground_truth,...}
 # Output: result_<modello>/seed<seed>/<categoria>/
