@@ -13,24 +13,31 @@
 #SBATCH --mail-user=s346291@studenti.polito.it
 #
 # 12 core e 96 GB = quota di un nodo gpu_a40 per GPU (48 core / 4 GPU, RAM = 2x VRAM).
-# gpu_a40 ha un tetto di 24h: se le 10 run non ci stanno, lancia un seed per volta.
+# gpu_a40 ha un tetto di 24h: se le run non ci stanno, lancia un seed per volta.
 #
 # uso:
-#   sbatch slurm/run_seeds.sbatch <categoria>        # 5 seed x 1 modelli
-#   sbatch slurm/run_seeds.sbatch <categoria> 42     # un seed solo
+#   sbatch slurm/run_seeds.sbatch <cartella_dataset> <categoria>        # 5 seed x 1 modello
+#   sbatch slurm/run_seeds.sbatch <cartella_dataset> <categoria> 42     # un seed solo
 #
+# <cartella_dataset> contiene le categorie: <cartella_dataset>/<categoria>/{train/good,ground_truth,...}
 # Output: result_<modello>/seed<seed>/<categoria>/
 # Riprende: le run concluse lasciano un .done e vengono saltate.
 
 set -uo pipefail          # NIENTE -e: un seed che fallisce non ferma gli altri
 
-CATEGORY="${1:?uso: sbatch run_seeds.sbatch <categoria> [seed ...]}"
-shift
+USAGE="uso: sbatch run_seeds.sbatch <cartella_dataset> <categoria> [seed ...]"
+DATA_ROOT="${1:?${USAGE}}"
+CATEGORY="${2:?${USAGE}}"
+shift 2
 if [[ $# -gt 0 ]]; then SEEDS=("$@"); else SEEDS=(0 1 2 42 101); fi
 MODELS=(efficientad)
 
 cd "${SLURM_SUBMIT_DIR}"
 mkdir -p slurm_logs
+
+# Percorso assoluto: un path relativo si intende rispetto alla dir da cui fai sbatch.
+[[ -d "${DATA_ROOT}" ]] || { echo "[error] cartella dataset inesistente: ${DATA_ROOT}"; exit 2; }
+DATA_ROOT="$(realpath "${DATA_ROOT}")"
 
 export PATH="${HOME}/env_ema_tesi/bin:${PATH}"
 export OMP_NUM_THREADS=1
@@ -39,14 +46,16 @@ export PYTHONUNBUFFERED=1
 export HF_HUB_OFFLINE=1        # i nodi di calcolo non hanno rete: usa la cache
 
 # Pre-flight: meglio morire qui che dopo un'ora di training.
-[[ -d "data/${CATEGORY}/train/good" ]]   || { echo "[error] manca data/${CATEGORY}/train/good"; exit 2; }
-[[ -d "data/${CATEGORY}/ground_truth" ]] || { echo "[error] manca data/${CATEGORY}/ground_truth"; exit 2; }
-[[ -d "pre_trained/efficientad_pretrained_weights" ]] || { echo "[error] pesi EfficientAD non pre-scaricati"; exit 2; }
+[[ -d "${DATA_ROOT}/${CATEGORY}/train/good" ]]   || { echo "[error] manca ${DATA_ROOT}/${CATEGORY}/train/good"; exit 2; }
+[[ -d "${DATA_ROOT}/${CATEGORY}/ground_truth" ]] || { echo "[error] manca ${DATA_ROOT}/${CATEGORY}/ground_truth"; exit 2; }
+if [[ " ${MODELS[*]} " == *" efficientad "* ]]; then
+  [[ -d "pre_trained/efficientad_pretrained_weights" ]] || { echo "[error] pesi EfficientAD non pre-scaricati"; exit 2; }
+fi
 nvidia-smi -L | grep -q GPU              || { echo "[error] nessuna GPU: manca --gres?"; exit 3; }
 python -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" \
                                          || { echo "[error] torch non vede la GPU"; exit 3; }
 
-echo "nodo: $(hostname)  categoria: ${CATEGORY}  seed: ${SEEDS[*]}"
+echo "nodo: $(hostname)  dataset: ${DATA_ROOT}  categoria: ${CATEGORY}  seed: ${SEEDS[*]}"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 for SEED in "${SEEDS[@]}"; do
@@ -59,6 +68,7 @@ for SEED in "${SEEDS[@]}"; do
     mkdir -p "${RUN_DIR}"
     echo "===== ${CATEGORY} | seed ${SEED} | ${MODEL} | $(date -Is) ====="
     python main.py --baseline "${MODEL}" --seed "${SEED}" \
+                   --data-root "${DATA_ROOT}" \
                    --category "${CATEGORY}" --run-dir "${RUN_DIR}" \
       2>&1 | tee "${RUN_DIR}/train.log"
     rc=${PIPESTATUS[0]}
