@@ -9,16 +9,17 @@
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=96G
 #SBATCH --time=1-00:00:00
-#SBATCH --mail-type=FAIL  
+#SBATCH --mail-type=FAIL
 #SBATCH --mail-user=s346291@studenti.polito.it
 #
 # 12 core e 96 GB = quota di un nodo gpu_a40 per GPU (48 core / 4 GPU, RAM = 2x VRAM).
 # gpu_a40 ha un tetto di 24h: se le 10 run non ci stanno, lancia un seed per volta.
 #
 # uso:
-#   sbatch slurm/run_seeds.sbatch <categoria>        # 5 seed x 2 modelli
+#   sbatch slurm/run_seeds.sbatch <categoria>        # 5 seed x 1 modelli
 #   sbatch slurm/run_seeds.sbatch <categoria> 42     # un seed solo
 #
+# Output: result_<modello>/seed<seed>/<categoria>/
 # Riprende: le run concluse lasciano un .done e vengono saltate.
 
 set -uo pipefail          # NIENTE -e: un seed che fallisce non ferma gli altri
@@ -26,7 +27,7 @@ set -uo pipefail          # NIENTE -e: un seed che fallisce non ferma gli altri
 CATEGORY="${1:?uso: sbatch run_seeds.sbatch <categoria> [seed ...]}"
 shift
 if [[ $# -gt 0 ]]; then SEEDS=("$@"); else SEEDS=(0 1 2 42 101); fi
-MODELS=(patchcore efficientad)
+MODELS=(efficientad)
 
 cd "${SLURM_SUBMIT_DIR}"
 mkdir -p slurm_logs
@@ -50,7 +51,7 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 for SEED in "${SEEDS[@]}"; do
   for MODEL in "${MODELS[@]}"; do
-    RUN_DIR="results/${CATEGORY}/seed${SEED}/${MODEL}"
+    RUN_DIR="result_${MODEL}/seed${SEED}/${CATEGORY}"
     if [[ -f "${RUN_DIR}/.done" ]]; then
       echo "[skip] ${RUN_DIR}"
       continue
