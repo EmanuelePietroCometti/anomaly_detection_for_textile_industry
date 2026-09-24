@@ -93,6 +93,12 @@ def main():
         help="Overrides datamodule_configuration.category (the dataset folder under data/)."
     )
     argparser.add_argument(
+        "--data-root",
+        type=str,
+        default=None,
+        help="Overrides datamodule_configuration.root (the folder containing the category folders)."
+    )
+    argparser.add_argument(
         "--run-dir",
         type=str,
         default=None,
@@ -110,6 +116,9 @@ def main():
     config.setdefault("run", {})["seed"] = seed
     print(f"\n[INFO] Global seed set to {seed}")
     
+    if args.data_root:
+        config["datamodule_configuration"]["root"] = args.data_root
+
     if args.retrain:
         print("\n[WARNING] Supervised retraining enabled. Make sure to set --mode to 'supervised' and have the necessary labeled data available for retraining.")
 
