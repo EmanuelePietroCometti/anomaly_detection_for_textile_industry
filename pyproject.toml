@@ -21,6 +21,7 @@ dependencies = [
     "onnx (>=1.21.0,<2.0.0)",
     "torchinfo (>=1.8.0,<2.0.0)",
     "onnxruntime-gpu (>=1.27.0,<2.0.0)",
+    "pandas (>=2.2.0,<3.0.0)",
     "onnxruntime (>=1.27.0,<2.0.0)"
 ]
 
