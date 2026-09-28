@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 from anomalib.data import Folder
+from src.anomaly_pipeline import prepare_test_masks
 from anomalib.data.utils.split import ValSplitMode
 from anomalib.engine import Engine
 from anomalib.models import EfficientAd
@@ -40,6 +41,12 @@ def objective(trial, base_config):
     test_path = dataset_path / "test"
     abnormal_dirs = [f"test/{d}" for d in os.listdir(test_path) if (test_path / d).is_dir() and d != "good"] if test_path.exists() else []
 
+    # ground_truth/ contiene anche le maschere di train/validation: seleziona solo quelle di test
+    mask_dir = "ground_truth"
+    if abnormal_dirs:
+        mask_root = Path(base_config.get("paths", {}).get("default_root_dir", "results")) / "test_masks" / category
+        mask_dir = str(prepare_test_masks(dataset_path, abnormal_dirs, mask_root).resolve())
+
     # EfficientAD strictly requires train_batch_size=1 due to its internal student-teacher penalty logic
     datamodule = Folder(
         name=category,
@@ -47,7 +54,7 @@ def objective(trial, base_config):
         normal_dir="train/good",
         normal_test_dir="test/good",
         abnormal_dir=abnormal_dirs,
-        mask_dir="ground_truth",
+        mask_dir=mask_dir,
         train_batch_size=1, 
         eval_batch_size=base_config.get("efficientad_configuration", {}).get("eval_batch_size", 1),
         num_workers=datamodule_cfg.get("num_workers", 4),
